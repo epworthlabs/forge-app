@@ -10,7 +10,7 @@ struct TrainView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(store.program.name).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        Text("\(store.program.name) · \(store.currentProgramDayName)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                         Text("Log Workout").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
                     }
 

@@ -118,7 +118,7 @@ struct TodayView: View {
 
                     LiquidCard {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(store.program.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            Text(store.currentProgramDayName).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             Text(store.todaysExercises.map(\.exercise.name).joined(separator: " · "))
                                 .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).lineLimit(1)
                             Button { selectedTab = .train } label: {

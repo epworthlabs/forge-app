@@ -42,6 +42,11 @@ enum Meal: String, CaseIterable, Identifiable {
 final class AppStore: ObservableObject {
     @Published var profile: UserProfile
     @Published var program: ProgramTemplate
+    // FRG-104 — which of program.days is "today." Programs with more than one day rotate by
+    // session (advances on Finish Workout), not by calendar date — there's no weekly-schedule
+    // concept (e.g. "Push is always Monday") in this app, matching how most non-calendar-locked
+    // splits (PPL, Upper/Lower) actually get run in practice.
+    @Published var currentProgramDayIndex: Int
 
     @Published var trailingSessions: [WorkoutSession] = []
     @Published var todaysExercises: [ExerciseSlot]
@@ -69,20 +74,36 @@ final class AppStore: ObservableObject {
     @Published private(set) var recentFoods: [FoodSearchResult] = []
     let foodSearchService = FoodSearchService(credentials: Secrets.foodDatabaseCredentials, countryFilter: Secrets.foodDatabaseCountryFilter)
 
-    init(profile: UserProfile, program: ProgramTemplate) {
+    init(profile: UserProfile, program: ProgramTemplate, startingDayIndex: Int = 0) {
         self.profile = profile
         self.program = program
+        self.currentProgramDayIndex = startingDayIndex
         self.bodyweightLogLb = [(Date(), profile.weightKg / 0.45359237)]
-
-        let legDay = ExerciseLibrary.search("Barbell Squat").first
-        let rdl = ExerciseLibrary.search("Romanian Deadlift").first
-        let legPress = ExerciseLibrary.search("Leg Press").first
-        self.todaysExercises = [legDay, rdl, legPress].compactMap { $0 }.enumerated().map { i, ex in
-            let targetWeight = 100 + Double(i) * 10
-            return ExerciseSlot(exercise: ex, targetSets: 4, targetReps: 8, targetWeightKg: targetWeight,
-                                 lastPerformance: nil, sets: (0..<4).map { _ in LoggedSet(weightKg: targetWeight, reps: 8) })
-        }
+        self.todaysExercises = Self.buildExerciseSlots(for: program, dayIndex: startingDayIndex)
         refreshLastPerformance()
+    }
+
+    // FRG-104 — the whole point of a "program": turns its day-by-day exercise list into the
+    // actual ExerciseSlots Train/Today read. `exercise.name` matching against the exercise it was
+    // authored against (curated templates) or picked from the library (custom programs) means
+    // this can't silently drop an exercise — ExerciseLibrary.search always has an exact match for
+    // names that came from the library itself.
+    private static func buildExerciseSlots(for program: ProgramTemplate, dayIndex: Int) -> [ExerciseSlot] {
+        guard !program.days.isEmpty else { return [] }
+        let day = program.days[dayIndex % program.days.count]
+        return day.exercises.compactMap { programExercise -> ExerciseSlot? in
+            guard let exercise = ExerciseLibrary.search(programExercise.exerciseName).first(where: { $0.name == programExercise.exerciseName }) else { return nil }
+            return ExerciseSlot(
+                exercise: exercise, targetSets: programExercise.targetSets, targetReps: programExercise.targetReps,
+                targetWeightKg: programExercise.targetWeightKg, lastPerformance: nil,
+                sets: (0..<programExercise.targetSets).map { _ in LoggedSet(weightKg: programExercise.targetWeightKg, reps: programExercise.targetReps) }
+            )
+        }
+    }
+
+    var currentProgramDayName: String {
+        guard !program.days.isEmpty else { return program.name }
+        return program.days[currentProgramDayIndex % program.days.count].name
     }
 
     var currentLoadScore: Double {
@@ -170,15 +191,16 @@ final class AppStore: ObservableObject {
         trailingSessions.append(session)
         workoutsCompletedThisWeek += 1
 
-        for exIdx in todaysExercises.indices {
-            for setIdx in todaysExercises[exIdx].sets.indices {
-                todaysExercises[exIdx].sets[setIdx].done = false
-                todaysExercises[exIdx].sets[setIdx].rpe = nil
-            }
-        }
+        // FRG-104 — advance to the next day in the program's rotation and rebuild the exercise
+        // list from it, rather than just resetting today's `done` flags in place.
+        currentProgramDayIndex = program.days.isEmpty ? 0 : (currentProgramDayIndex + 1) % program.days.count
+        todaysExercises = Self.buildExerciseSlots(for: program, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
 
-        Task { try? await CloudKitStore.shared.saveWorkoutSession(session) }
+        Task {
+            try? await CloudKitStore.shared.saveWorkoutSession(session)
+            try? await CloudKitStore.shared.saveProfile(profile, program: program, dayIndex: currentProgramDayIndex)
+        }
     }
 
     // FRG-112/113 — the most recent logged set for a given exercise, searched newest-session

@@ -190,6 +190,8 @@ private struct TrainingDaysStep: View {
 private struct ProgramSelectStep: View {
     @ObservedObject var model: OnboardingViewModel
     var onComplete: (UserProfile, ProgramTemplate) -> Void
+    @State private var buildingCustomProgram = false
+    @State private var customProgram: ProgramTemplate?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -220,6 +222,41 @@ private struct ProgramSelectStep: View {
                         }
                         .buttonStyle(.plain)
                     }
+
+                    if let customProgram {
+                        Button {
+                            model.selectedProgram = customProgram
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(customProgram.name).font(ForgeType.body)
+                                Text(customProgram.meta).font(ForgeType.caption)
+                                    .foregroundStyle(model.selectedProgram == customProgram ? .white.opacity(0.85) : ForgeColors.inkMuted)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .foregroundStyle(model.selectedProgram == customProgram ? .white : ForgeColors.ink)
+                            .background {
+                                model.selectedProgram == customProgram
+                                    ? AnyView(ForgeColors.accent)
+                                    : AnyView(Rectangle().fill(.ultraThinMaterial))
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button { buildingCustomProgram = true } label: {
+                        Text("+ Build custom program").font(ForgeType.body).frame(maxWidth: .infinity)
+                            .padding(16).foregroundStyle(ForgeColors.inkMuted)
+                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(ForgeColors.cardBorder, style: StrokeStyle(dash: [5, 4])))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .sheet(isPresented: $buildingCustomProgram) {
+                CustomProgramBuilderView { program in
+                    customProgram = program
+                    model.selectedProgram = program
                 }
             }
 

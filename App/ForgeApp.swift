@@ -36,15 +36,15 @@ struct RootView: View {
                 OnboardingView { profile, program in
                     let newStore = AppStore(profile: profile, program: program)
                     store = newStore
-                    Task { try? await CloudKitStore.shared.saveProfile(profile, program: program) }
+                    Task { try? await CloudKitStore.shared.saveProfile(profile, program: program, dayIndex: 0) }
                 }
             }
         }
         .task {
             // FRG-130/131 — a returning user with a saved CloudKit profile skips onboarding
             // entirely; a brand-new user (or one without CloudKit access yet) sees it as before.
-            if let (profile, program) = try? await CloudKitStore.shared.fetchProfile() {
-                let loadedStore = AppStore(profile: profile, program: program)
+            if let (profile, program, dayIndex) = try? await CloudKitStore.shared.fetchProfile() {
+                let loadedStore = AppStore(profile: profile, program: program, startingDayIndex: dayIndex)
                 await loadedStore.loadHistoryFromCloudKit()
                 store = loadedStore
             }

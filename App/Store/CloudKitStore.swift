@@ -25,7 +25,7 @@ actor CloudKitStore {
 
     private static let profileRecordID = CKRecord.ID(recordName: "profile")
 
-    func saveProfile(_ profile: UserProfile, program: ProgramTemplate) async throws {
+    func saveProfile(_ profile: UserProfile, program: ProgramTemplate, dayIndex: Int) async throws {
         let record = (try? await database.record(for: Self.profileRecordID)) ?? CKRecord(recordType: "Profile", recordID: Self.profileRecordID)
         record["weightKg"] = profile.weightKg
         record["heightCm"] = profile.heightCm
@@ -36,12 +36,16 @@ actor CloudKitStore {
         record["fatFreeMassKg"] = profile.fatFreeMassKg
         record["programID"] = program.id
         record["programName"] = program.name
-        record["programDaysPerWeek"] = program.daysPerWeek
+        // FRG-104 — days carries the actual exercise content (curated or user-built); JSON-encoded
+        // into one field rather than a child-record hierarchy, since a program's full day/exercise
+        // list is small and always read/written as a whole, never queried piecemeal.
+        record["programDaysJSON"] = try JSONEncoder().encode(program.days)
         record["programWeeks"] = program.weeks
+        record["currentProgramDayIndex"] = dayIndex
         _ = try await database.save(record)
     }
 
-    func fetchProfile() async throws -> (profile: UserProfile, program: ProgramTemplate)? {
+    func fetchProfile() async throws -> (profile: UserProfile, program: ProgramTemplate, dayIndex: Int)? {
         guard let record = try? await database.record(for: Self.profileRecordID),
               let weightKg = record["weightKg"] as? Double,
               let heightCm = record["heightCm"] as? Double,
@@ -51,14 +55,20 @@ actor CloudKitStore {
               let goalRaw = record["goal"] as? String, let goal = Goal(rawValue: goalRaw),
               let programID = record["programID"] as? String,
               let programName = record["programName"] as? String,
-              let programDaysPerWeek = record["programDaysPerWeek"] as? Int,
               let programWeeks = record["programWeeks"] as? Int
         else { return nil }
 
         let profile = UserProfile(weightKg: weightKg, heightCm: heightCm, age: age, sex: sex, activityLevel: activityLevel,
                                    goal: goal, fatFreeMassKg: record["fatFreeMassKg"] as? Double)
-        let program = ProgramTemplate(id: programID, name: programName, daysPerWeek: programDaysPerWeek, weeks: programWeeks)
-        return (profile, program)
+        let days: [ProgramDay]
+        if let daysData = record["programDaysJSON"] as? Data, let decoded = try? JSONDecoder().decode([ProgramDay].self, from: daysData) {
+            days = decoded
+        } else {
+            days = [] // records saved before FRG-104 won't have this field
+        }
+        let program = ProgramTemplate(id: programID, name: programName, weeks: programWeeks, days: days)
+        let dayIndex = record["currentProgramDayIndex"] as? Int ?? 0
+        return (profile, program, dayIndex)
     }
 
     // MARK: Workout sessions — sets serialized as JSON; a session is small enough that a child
