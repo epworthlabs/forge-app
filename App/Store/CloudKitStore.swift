@@ -16,7 +16,7 @@ import ForgeCore
 actor CloudKitStore {
     static let shared = CloudKitStore()
 
-    private let container = CKContainer(identifier: "iCloud.com.forge.app")
+    private let container = CKContainer(identifier: "iCloud.com.epworthlabs.forge")
     private var database: CKDatabase { container.privateCloudDatabase }
 
     private init() {}

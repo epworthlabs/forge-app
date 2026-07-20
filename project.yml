@@ -1,6 +1,6 @@
 name: Forge
 options:
-  bundleIdPrefix: com.forge
+  bundleIdPrefix: com.epworthlabs
   deploymentTarget:
     iOS: "16.0"
 packages:
@@ -24,7 +24,7 @@ targets:
         product: PostHog
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.forge.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.epworthlabs.forge
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
@@ -38,6 +38,6 @@ targets:
       path: App/Forge.entitlements
       properties:
         com.apple.developer.icloud-services: [CloudKit]
-        com.apple.developer.icloud-container-identifiers: ["iCloud.com.forge.app"]
+        com.apple.developer.icloud-container-identifiers: ["iCloud.com.epworthlabs.forge"]
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
