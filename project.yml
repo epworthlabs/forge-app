@@ -6,15 +6,22 @@ options:
 packages:
   ForgeCore:
     path: .
+  PostHog:
+    url: https://github.com/PostHog/posthog-ios.git
+    from: 3.0.0
 targets:
   Forge:
     type: application
     platform: iOS
     sources:
-      - App
+      - path: App
+        excludes:
+          - "Config/Secrets.example.swift"
     dependencies:
       - package: ForgeCore
         product: ForgeCore
+      - package: PostHog
+        product: PostHog
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.forge.app
@@ -24,6 +31,7 @@ targets:
       path: App/Info.plist
       properties:
         UILaunchScreen: {}
+        NSCameraUsageDescription: "Used to scan a food barcode instead of typing it in."
     entitlements:
       path: App/Forge.entitlements
       properties:

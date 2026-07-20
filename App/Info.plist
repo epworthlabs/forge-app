@@ -18,6 +18,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to scan a food barcode instead of typing it in.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

@@ -52,6 +52,10 @@ final class AppStore: ObservableObject {
 
     @Published var sheetPresented = false
 
+    // FRG-302 — recent/frequent foods, capped and deduped by name+brand, most-recent first.
+    @Published private(set) var recentFoods: [FoodSearchResult] = []
+    let foodSearchService = FoodSearchService(credentials: Secrets.foodDatabaseCredentials, countryFilter: Secrets.foodDatabaseCountryFilter)
+
     init(profile: UserProfile, program: ProgramTemplate) {
         self.profile = profile
         self.program = program
@@ -90,8 +94,23 @@ final class AppStore: ObservableObject {
                 entries.reduce(0) { $0 + $1.carbG }, entries.reduce(0) { $0 + $1.fatG })
     }
 
-    func addFood(_ entry: FoodEntry, to meal: Meal) {
+    func logFood(_ result: FoodSearchResult, to meal: Meal) {
+        let entry = FoodEntry(
+            name: result.name,
+            kcal: result.kcal,
+            proteinG: Int(result.proteinG.rounded()),
+            carbG: Int(result.carbG.rounded()),
+            fatG: Int(result.fatG.rounded())
+        )
         mealEntries[meal, default: []].append(entry)
+
+        recentFoods.removeAll { $0.name == result.name && $0.brand == result.brand }
+        recentFoods.insert(result, at: 0)
+        if recentFoods.count > 10 { recentFoods.removeLast() }
+    }
+
+    func lookupBarcode(_ code: String) async -> FoodSearchResult? {
+        await foodSearchService.lookupBarcode(code)
     }
 
     func toggleSet(exerciseID: ExerciseSlot.ID, setID: LoggedSet.ID) {

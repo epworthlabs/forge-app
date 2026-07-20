@@ -1,5 +1,6 @@
 import SwiftUI
 import ForgeCore
+import PostHog
 
 struct OnboardingView: View {
     @StateObject private var model = OnboardingViewModel()
@@ -226,6 +227,12 @@ private struct ProgramSelectStep: View {
                 // Height/age/sex placeholders here until a body-details step exists — tracked in FRG-101.
                 guard let profile = model.buildProfile(heightCm: 178, age: 30, sex: .male),
                       let program = model.selectedProgram else { return }
+                // Goal 05 (PRD): per-feature engagement signal for the free-first paywall decision.
+                PostHogSDK.shared.capture("onboarding_completed", properties: [
+                    "program_id": program.id,
+                    "program_name": program.name,
+                    "goal": model.goal?.displayLabel ?? "unknown",
+                ])
                 onComplete(profile, program)
             }
         }

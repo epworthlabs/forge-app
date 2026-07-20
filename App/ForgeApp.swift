@@ -1,8 +1,16 @@
 import SwiftUI
 import ForgeCore
+import PostHog
 
 @main
 struct ForgeApp: App {
+    init() {
+        if let apiKey = Secrets.postHogAPIKey, !apiKey.isEmpty {
+            let config = PostHogConfig(projectToken: apiKey, host: Secrets.postHogHost)
+            PostHogSDK.shared.setup(config)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

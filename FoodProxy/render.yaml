@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: forge-food-proxy
+    runtime: node
+    plan: free
+    rootDir: FoodProxy
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: FATSECRET_CLIENT_ID
+        sync: false
+      - key: FATSECRET_CLIENT_SECRET
+        sync: false
+      - key: APP_SHARED_SECRET
+        sync: false

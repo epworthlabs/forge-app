@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import PostHog
 
 struct ProgressTabView: View {
     @EnvironmentObject var store: AppStore
@@ -63,5 +64,7 @@ struct ProgressTabView: View {
                 .padding(.bottom, 90)
             }
         }
+        // Goal 05 (PRD): history-depth engagement signal for the free-first paywall decision.
+        .onAppear { PostHogSDK.shared.capture("progress_viewed") }
     }
 }
