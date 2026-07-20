@@ -23,10 +23,10 @@ Then from this folder: `xcodegen generate`, open `Forge.xcodeproj`, select a sim
 
 To run just the engine tests: `swift test`.
 
-## Status (2026-07-19)
+## Status (2026-07-20)
 
 **Done and verified — both compiled and run in Simulator (iPhone 17), not just compile-checked:**
-- `ForgeCore` — Load Score, TDEE/macro calculation, RED-S floor guardrail, carb-band selection, exercise library (`free-exercise-db`, 873 exercises), food database layer (USDA FDC + Open Food Facts + FatSecret, see below). 22 tests passing (`swift test`), stable across repeated runs.
+- `ForgeCore` — Load Score, TDEE/macro calculation, RED-S floor guardrail, carb-band selection, weekly weight-trend recalibration (FRG-301), exercise library (`free-exercise-db`, 873 exercises), food database layer (USDA FDC + Open Food Facts + FatSecret, see below). 28 tests passing (`swift test`), stable across repeated runs.
 - Onboarding (4 steps), Today, Target Explanation sheet, Train (per-exercise sets with RPE picker), Eat (diary + **live food search** against real USDA/Open Food Facts data, barcode scan entry point, recent/frequent foods), Progress, You. Both light and dark mode confirmed.
 - **Food database (FRG-120–124, P0) + barcode scanning (FRG-125, P1) + recent/frequent foods (FRG-302, P1)**: `FoodSearchService` queries USDA FDC and Open Food Facts concurrently and merges results — confirmed with real live network calls in Simulator, not just mocked tests. `FatSecretClient` now calls a proxy server (`FoodProxy/`) instead of FatSecret directly — real credentials confirmed the OAuth2 flow itself is correct (live curl test: token exchange succeeded), but FatSecret rejects direct calls from a mobile app's IP by design (see `FoodProxy/README.md`). The proxy code is built and passes local review + the full test suite, but hasn't been deployed yet — that's the one remaining unverified step, blocked on the user deploying `FoodProxy/` to Render and allowlisting its IP in the FatSecret dashboard.
 
@@ -41,7 +41,13 @@ To run just the engine tests: `swift test`.
 
 **PostHog (FRG-003)**: live and verified — `PostHogSDK` initializes with the real Project API Key in `App/ForgeApp.swift`, confirmed via a real network trace in Simulator (TLS handshake + HTTP 304 from `us-assets.i.posthog.com`, not just a compile check). Two Goal 05 events instrumented so far: `onboarding_completed` (program + goal chosen) and `progress_viewed` (history-depth engagement). More events can be added the same way as other Goal 05 signals (e.g. AI-convenience feature usage) become buildable.
 
-**Not started:** CloudKit persistence (FRG-130/131 — screens run on in-memory `AppStore`; swapping the storage shouldn't require view changes), weekly weight-trend recalibration (FRG-301), AI photo meal estimate (FRG-303, needs a vision-model decision first), Apple Health sync + sleep modifier (FRG-304/305), logging reminders (FRG-306), CSV export (FRG-307). See `../engineering-backlog.html`.
+**FRG-301, FRG-304, FRG-306, FRG-307 (P1 fast-follows)** — no wireframes existed for any of these (the 9-screen wireframe set is P0-only); built to match the existing app's visual language instead:
+- **FRG-301 weekly recalibration**: `WeeklyRecalibrationEngine` compares actual weight trend (from `bodyweightLogLb`) against the trend the goal's TDEE adjustment implies, and nudges the baseline calorie target to close the gap — damped and capped the same way Load Score's daily swing is. Needs 4+ weigh-ins across a 14-day window before it activates (otherwise a single noisy weigh-in could swing the target). Surfaced as its own line in the Target Explanation sheet.
+- **FRG-304 Apple Health sync**: `HealthKitManager` reads steps and sleep (read-only, `com.apple.developer.healthkit` entitlement + `NSHealthShareUsageDescription`). Toggle in You; confirmed the entitlement doesn't break install/launch in Simulator. FRG-305 (the actual Load-Score sleep dampening) is a separate, still-unbuilt ticket — this only makes the data available.
+- **FRG-306 logging reminders**: `ReminderManager` schedules local notifications (7pm workout / 8pm meal), cancelled the moment the user actually logs — no server/push infrastructure needed.
+- **FRG-307 CSV export**: `CSVExporter` + `ShareLink`. Nutrition and per-exercise detail are limited to today — the in-memory store doesn't persist multi-day detail yet (that's what CloudKit persistence, FRG-130/131, will unlock); historical bodyweight and per-session volume load already export in full.
+
+**Not started:** CloudKit persistence (FRG-130/131 — screens run on in-memory `AppStore`; swapping the storage shouldn't require view changes), AI photo meal estimate (FRG-303, needs a vision-model decision first), sleep modifier activation (FRG-305, depends on FRG-304). See `../engineering-backlog.html`.
 
 **Also needed before shipping, not before building:**
 - Inter font files (Google Fonts, OFL license) aren't bundled yet — `ForgeType` falls back to the system font.

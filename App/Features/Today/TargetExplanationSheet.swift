@@ -14,6 +14,9 @@ struct TargetExplanationSheet: View {
                 .padding(.bottom, 6)
 
             ExplanationRow(label: "Baseline (maintenance)", value: "\(Int(target.baselineMaintenanceCalories)) kcal")
+            if target.weeklyRecalibrationKcal != 0 {
+                ExplanationRow(label: "Weekly trend recalibration", value: signedKcal(target.weeklyRecalibrationKcal))
+            }
             ExplanationRow(label: "Today's Load Score", value: String(format: "%.1f× %@", target.loadScore, loadDescriptor(target.loadScore)), accent: true)
             ExplanationRow(label: "Adjustment", value: adjustmentText(target))
             ExplanationRow(label: "Protein (unchanged)", value: "\(Int(target.proteinG))g anchor", muted: true)
@@ -36,8 +39,12 @@ struct TargetExplanationSheet: View {
     }
 
     private func adjustmentText(_ target: NutritionTarget) -> String {
-        let sign = target.calorieAdjustment >= 0 ? "+" : ""
-        return "\(sign)\(Int(target.calorieAdjustment)) kcal"
+        signedKcal(target.calorieAdjustment)
+    }
+
+    private func signedKcal(_ value: Double) -> String {
+        let sign = value >= 0 ? "+" : ""
+        return "\(sign)\(Int(value)) kcal"
     }
 }
 

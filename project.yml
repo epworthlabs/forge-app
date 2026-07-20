@@ -32,8 +32,11 @@ targets:
       properties:
         UILaunchScreen: {}
         NSCameraUsageDescription: "Used to scan a food barcode instead of typing it in."
+        NSHealthShareUsageDescription: "Used to factor your steps and sleep into your daily targets."
     entitlements:
       path: App/Forge.entitlements
       properties:
         com.apple.developer.icloud-services: [CloudKit]
         com.apple.developer.icloud-container-identifiers: ["iCloud.com.forge.app"]
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []

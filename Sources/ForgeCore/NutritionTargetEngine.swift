@@ -11,6 +11,10 @@ public struct NutritionTarget: Sendable, Equatable {
     public var loadScore: Double
     public var calorieAdjustment: Double
     public var redSFloorApplied: Bool
+    /// FRG-301 — weekly weight-trend recalibration already folded into this baseline; broken out
+    /// separately here so the explanation sheet can show it as its own line, distinct from today's
+    /// Load Score swing.
+    public var weeklyRecalibrationKcal: Double
 }
 
 public enum NutritionTargetEngine {
@@ -19,8 +23,10 @@ public enum NutritionTargetEngine {
     /// worked example (2,500 kcal baseline, 1.4× Load Score → +180 kcal) pending real usage data.
     public static var k: Double = 0.18
 
-    public static func calculate(profile: UserProfile, loadScore: Double) -> NutritionTarget {
-        let tdeeGoal = TDEECalculator.goalAdjustedTDEE(profile)
+    public static func calculate(profile: UserProfile, loadScore: Double, weeklyRecalibrationKcal: Double = 0) -> NutritionTarget {
+        // FRG-301 — weekly recalibration shifts the baseline itself; Load Score's daily swing
+        // then applies on top of that shifted baseline, per the PRD's "layer on top of" framing.
+        let tdeeGoal = TDEECalculator.goalAdjustedTDEE(profile) + weeklyRecalibrationKcal
 
         let rawAdjustment = tdeeGoal * k * (loadScore - 1.0)
         let clippedAdjustment = max(-0.25 * tdeeGoal, min(0.25 * tdeeGoal, rawAdjustment))
@@ -63,7 +69,8 @@ public enum NutritionTargetEngine {
             baselineMaintenanceCalories: TDEECalculator.maintenanceTDEE(profile),
             loadScore: loadScore,
             calorieAdjustment: finalCalories - tdeeGoal,
-            redSFloorApplied: floorApplied
+            redSFloorApplied: floorApplied,
+            weeklyRecalibrationKcal: weeklyRecalibrationKcal
         )
     }
 

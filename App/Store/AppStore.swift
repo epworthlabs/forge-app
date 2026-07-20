@@ -52,6 +52,10 @@ final class AppStore: ObservableObject {
 
     @Published var sheetPresented = false
 
+    // FRG-304 — nil until Health sync is enabled and a fetch completes.
+    @Published var stepsToday: Int?
+    @Published var lastNightSleepHours: Double?
+
     // FRG-302 — recent/frequent foods, capped and deduped by name+brand, most-recent first.
     @Published private(set) var recentFoods: [FoodSearchResult] = []
     let foodSearchService = FoodSearchService(credentials: Secrets.foodDatabaseCredentials, countryFilter: Secrets.foodDatabaseCountryFilter)
@@ -79,7 +83,8 @@ final class AppStore: ObservableObject {
     }
 
     var nutritionTarget: NutritionTarget {
-        NutritionTargetEngine.calculate(profile: profile, loadScore: currentLoadScore)
+        let recalibration = WeeklyRecalibrationEngine.recalibratedBaselineAdjustment(profile: profile, weighIns: bodyweightLogLb)
+        return NutritionTargetEngine.calculate(profile: profile, loadScore: currentLoadScore, weeklyRecalibrationKcal: recalibration)
     }
 
     var hasTrainingHistory: Bool { !trailingSessions.isEmpty }
@@ -107,6 +112,16 @@ final class AppStore: ObservableObject {
         recentFoods.removeAll { $0.name == result.name && $0.brand == result.brand }
         recentFoods.insert(result, at: 0)
         if recentFoods.count > 10 { recentFoods.removeLast() }
+
+        // FRG-306 — no-op if no meal reminder is pending (reminders off, or already cancelled).
+        ReminderManager.shared.cancelMealReminder()
+    }
+
+    // FRG-306 — re-evaluates tonight's reminders against current state; call on toggle-enable and
+    // on every app backgrounding so a reminder already satisfied earlier today never re-fires.
+    func refreshReminders() {
+        let workoutDone = todaysExercises.contains { $0.sets.contains { $0.done } }
+        ReminderManager.shared.scheduleEveningReminders(workoutDone: workoutDone, mealsLoggedToday: !allFoodEntriesToday().isEmpty)
     }
 
     func lookupBarcode(_ code: String) async -> FoodSearchResult? {
@@ -118,6 +133,8 @@ final class AppStore: ObservableObject {
               let setIdx = todaysExercises[exIdx].sets.firstIndex(where: { $0.id == setID }) else { return }
         todaysExercises[exIdx].sets[setIdx].done.toggle()
         restSecondsRemaining = todaysExercises[exIdx].sets[setIdx].done ? 105 : restSecondsRemaining
+        // FRG-306 — no-op if no workout reminder is pending (reminders off, or already cancelled).
+        if todaysExercises[exIdx].sets[setIdx].done { ReminderManager.shared.cancelWorkoutReminder() }
     }
 
     func updateRPE(exerciseID: ExerciseSlot.ID, setID: LoggedSet.ID, rpe: Double) {
@@ -130,5 +147,14 @@ final class AppStore: ObservableObject {
         guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         let last = todaysExercises[exIdx].sets.last
         todaysExercises[exIdx].sets.append(LoggedSet(weightKg: last?.weightKg ?? 20, reps: last?.reps ?? 8))
+    }
+
+    // FRG-304 — refreshes both readouts from HealthKit; safe to call repeatedly (e.g. on
+    // foreground) since each fetch is a fresh query, not a subscription.
+    func syncHealthKit() async {
+        async let steps = HealthKitManager.shared.fetchTodayStepCount()
+        async let sleep = HealthKitManager.shared.fetchLastNightSleepHours()
+        stepsToday = await steps
+        lastNightSleepHours = await sleep
     }
 }

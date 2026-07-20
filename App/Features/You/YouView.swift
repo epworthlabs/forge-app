@@ -4,6 +4,8 @@ import ForgeCore
 struct YouView: View {
     @EnvironmentObject var store: AppStore
     @AppStorage("forceDarkMode") private var forceDarkMode = false
+    @AppStorage("remindersEnabled") private var remindersEnabled = false
+    @AppStorage("healthSyncEnabled") private var healthSyncEnabled = false
 
     var body: some View {
         ZStack {
@@ -34,11 +36,56 @@ struct YouView: View {
 
                             SettingsRow(title: "Edit Preferences")
                             Divider().overlay(ForgeColors.cardBorder)
-                            SettingsRow(title: "Logging reminders", tag: "P1")
+
+                            Toggle(isOn: $remindersEnabled) {
+                                Text("Logging reminders").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            }
+                            .tint(ForgeColors.accent)
+                            .padding(.vertical, 9)
+                            .onChange(of: remindersEnabled) { enabled in
+                                if enabled {
+                                    Task {
+                                        let granted = await ReminderManager.shared.requestAuthorizationIfNeeded()
+                                        if granted { store.refreshReminders() } else { remindersEnabled = false }
+                                    }
+                                } else {
+                                    ReminderManager.shared.cancelAll()
+                                }
+                            }
                             Divider().overlay(ForgeColors.cardBorder)
-                            SettingsRow(title: "Apple Health sync", tag: "P1")
+                            Toggle(isOn: $healthSyncEnabled) {
+                                Text("Apple Health sync").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            }
+                            .tint(ForgeColors.accent)
+                            .padding(.vertical, 9)
+                            .onChange(of: healthSyncEnabled) { enabled in
+                                guard enabled else { return }
+                                Task {
+                                    let granted = await HealthKitManager.shared.requestAuthorization()
+                                    if granted { await store.syncHealthKit() } else { healthSyncEnabled = false }
+                                }
+                            }
+                            if healthSyncEnabled, store.stepsToday != nil || store.lastNightSleepHours != nil {
+                                HStack(spacing: 14) {
+                                    if let steps = store.stepsToday {
+                                        Text("\(steps) steps today").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                    }
+                                    if let sleep = store.lastNightSleepHours {
+                                        Text(String(format: "%.1fh sleep", sleep)).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                    }
+                                }
+                                .padding(.bottom, 6)
+                            }
                             Divider().overlay(ForgeColors.cardBorder)
-                            SettingsRow(title: "Export data (CSV)", tag: "P1")
+
+                            ShareLink(items: CSVExporter.exportFiles(store: store)) {
+                                HStack {
+                                    Text("Export data (CSV)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                    Spacer()
+                                    Image(systemName: "square.and.arrow.up").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                                }
+                                .padding(.vertical, 9)
+                            }
                         }
                     }
                 }
@@ -47,20 +94,19 @@ struct YouView: View {
             }
         }
         .preferredColorScheme(forceDarkMode ? .dark : nil)
+        .task {
+            // Returning users with Health sync already on: refresh on each visit rather than
+            // only right after the toggle flips.
+            if healthSyncEnabled { await store.syncHealthKit() }
+        }
     }
 }
 
 private struct SettingsRow: View {
     let title: String
-    var tag: String?
     var body: some View {
         HStack {
             Text(title).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-            if let tag {
-                Text(tag).font(ForgeType.label).foregroundStyle(.black)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(Color.yellow.opacity(0.7)).clipShape(RoundedRectangle(cornerRadius: 3))
-            }
             Spacer()
             Image(systemName: "chevron.right").foregroundStyle(ForgeColors.inkMuted).font(.caption)
         }

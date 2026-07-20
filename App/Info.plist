@@ -20,6 +20,8 @@
 	<string>1</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Used to scan a food barcode instead of typing it in.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Used to factor your steps and sleep into your daily targets.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>
