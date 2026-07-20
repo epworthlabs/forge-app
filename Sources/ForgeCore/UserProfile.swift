@@ -1,6 +1,6 @@
 import Foundation
 
-public enum Sex: Sendable {
+public enum Sex: String, Sendable {
     case male, female
 }
 
@@ -12,7 +12,7 @@ public enum ActivityLevel: Double, Sendable {
     var multiplier: Double { rawValue }
 }
 
-public enum Goal: Sendable {
+public enum Goal: String, Sendable {
     case cut, bulk, maintain, recomp
 
     /// Midpoint of the PRD's researched adjustment ranges (cut −15–25%, bulk +10–15%).

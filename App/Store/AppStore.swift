@@ -21,6 +21,7 @@ struct ExerciseSlot: Identifiable, Equatable {
 
 struct FoodEntry: Identifiable, Equatable {
     let id = UUID()
+    var date: Date = Date()
     var name: String
     var kcal: Int
     var proteinG: Int
@@ -33,9 +34,10 @@ enum Meal: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// In-memory app state — a stand-in for CloudKit persistence (FRG-130/131, not yet built).
-/// Screens are being built against this now so they're visually verifiable before the real
-/// sync layer lands; swapping the storage underneath shouldn't change any view code.
+/// FRG-130/131 — backed by CloudKit's private database. State stays in-memory as the source of
+/// truth for the UI (every view still just reads `@Published` properties, unchanged); mutating
+/// methods update that state immediately and fire off a background CloudKit write, rather than
+/// round-tripping through the network before the UI reflects a change.
 @MainActor
 final class AppStore: ObservableObject {
     @Published var profile: UserProfile
@@ -115,6 +117,51 @@ final class AppStore: ObservableObject {
 
         // FRG-306 — no-op if no meal reminder is pending (reminders off, or already cancelled).
         ReminderManager.shared.cancelMealReminder()
+
+        Task { try? await CloudKitStore.shared.saveFoodEntry(entry, meal: meal) }
+    }
+
+    // FRG-130/131 — appends a new weigh-in; there was previously no UI path that ever grew
+    // `bodyweightLogLb` past its single onboarding seed value.
+    func logWeight(_ weightLb: Double) {
+        let entry = (date: Date(), weightLb: weightLb)
+        bodyweightLogLb.append(entry)
+        Task { try? await CloudKitStore.shared.saveBodyweightEntry(date: entry.date, weightLb: entry.weightLb) }
+    }
+
+    // FRG-130/131 — archives today's completed sets into training history and resets the slate
+    // for next time. There was previously no path that ever appended to `trailingSessions`, so
+    // Load Score never actually changed session to session for a real user.
+    func finishWorkout() {
+        let completedSets = todaysExercises.flatMap { slot in
+            slot.sets.filter(\.done).map { SetLog(weightKg: $0.weightKg, reps: $0.reps, rpe: $0.rpe) }
+        }
+        guard !completedSets.isEmpty else { return }
+
+        let session = WorkoutSession(date: Date(), sets: completedSets)
+        trailingSessions.append(session)
+        workoutsCompletedThisWeek += 1
+
+        for exIdx in todaysExercises.indices {
+            for setIdx in todaysExercises[exIdx].sets.indices {
+                todaysExercises[exIdx].sets[setIdx].done = false
+                todaysExercises[exIdx].sets[setIdx].rpe = nil
+            }
+        }
+
+        Task { try? await CloudKitStore.shared.saveWorkoutSession(session) }
+    }
+
+    // FRG-130/131 — backfills history for a returning user; called once after construction
+    // rather than from `init` so the synchronous init never blocks on a network round-trip.
+    func loadHistoryFromCloudKit() async {
+        async let sessions = try? CloudKitStore.shared.fetchWorkoutSessions()
+        async let weighIns = try? CloudKitStore.shared.fetchBodyweightLog()
+        async let todaysFood = try? CloudKitStore.shared.fetchFoodEntries(from: Calendar.current.startOfDay(for: Date()), to: Date())
+
+        if let sessions = await sessions, !sessions.isEmpty { trailingSessions = sessions }
+        if let weighIns = await weighIns, !weighIns.isEmpty { bodyweightLogLb = weighIns }
+        if let todaysFood = await todaysFood { mealEntries = todaysFood }
     }
 
     // FRG-306 — re-evaluates tonight's reminders against current state; call on toggle-enable and

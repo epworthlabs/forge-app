@@ -27,6 +27,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.forge.app
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
     info:
       path: App/Info.plist
       properties:

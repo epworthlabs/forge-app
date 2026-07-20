@@ -29,6 +29,16 @@ struct TrainView: View {
                     ForEach(store.todaysExercises) { slot in
                         ExerciseCard(slot: slot)
                     }
+
+                    Button {
+                        store.finishWorkout()
+                    } label: {
+                        Text("Finish Workout").font(ForgeType.title).frame(maxWidth: .infinity)
+                            .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!store.todaysExercises.contains { $0.sets.contains(where: \.done) })
                 }
                 .padding(20)
                 .padding(.bottom, 40)

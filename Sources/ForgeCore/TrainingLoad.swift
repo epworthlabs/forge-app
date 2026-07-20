@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SetLog: Sendable {
+public struct SetLog: Sendable, Codable {
     public var weightKg: Double
     public var reps: Int
     /// RPE input is a first-class part of the logging UI (PRD FRG-110) — optional here only to
@@ -17,7 +17,7 @@ public struct SetLog: Sendable {
     var effortFactor: Double { (rpe ?? 8) / 10 }
 }
 
-public struct WorkoutSession: Sendable {
+public struct WorkoutSession: Sendable, Codable {
     public var date: Date
     public var sets: [SetLog]
 

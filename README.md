@@ -47,7 +47,13 @@ To run just the engine tests: `swift test`.
 - **FRG-306 logging reminders**: `ReminderManager` schedules local notifications (7pm workout / 8pm meal), cancelled the moment the user actually logs — no server/push infrastructure needed.
 - **FRG-307 CSV export**: `CSVExporter` + `ShareLink`. Nutrition and per-exercise detail are limited to today — the in-memory store doesn't persist multi-day detail yet (that's what CloudKit persistence, FRG-130/131, will unlock); historical bodyweight and per-session volume load already export in full.
 
-**Not started:** CloudKit persistence (FRG-130/131 — screens run on in-memory `AppStore`; swapping the storage shouldn't require view changes), AI photo meal estimate (FRG-303, needs a vision-model decision first), sleep modifier activation (FRG-305, depends on FRG-304). See `../engineering-backlog.html`.
+**CloudKit persistence (FRG-130/131)** — code-complete, builds and launches clean, but not yet verified end-to-end against a real container:
+- `CloudKitStore` (private database) persists profile+program, workout session history, bodyweight log, and today's food diary. `AppStore`'s `@Published` state is still the UI's only source of truth (no view code changed) — mutating methods update it immediately and fire a background CloudKit write.
+- Closed two real gaps this uncovered: there was previously no UI path that ever logged a second bodyweight entry, and no "finish workout" action that ever archived a session into history — both fixed (`+ Log weight` in Progress, `Finish Workout` in Train), since CloudKit persistence would otherwise have had nothing real to sync.
+- Returning users with a saved profile skip onboarding entirely (`RootView` checks CloudKit before deciding which screen to show).
+- **Two things remain before this is actually verified working**, both requiring the account owner: (1) select a real Team in Xcode's Signing & Capabilities tab — confirmed via `xcodebuild` that this hasn't happened yet (zero signing identities, no resolvable team), which is what actually provisions the CloudKit container; (2) once that's done, the `date` field on the WorkoutSession/FoodEntry/BodyweightEntry record types needs to be marked Queryable (and Sortable, for bodyweight) in the CloudKit Dashboard's Development schema — CloudKit doesn't auto-index custom fields for query predicates. Confirmed in Simulator that CloudKit calls fire and fail gracefully without a container (falls through to onboarding, doesn't hang) — real save/fetch is what's unverified.
+
+**Not started:** AI photo meal estimate (FRG-303, needs a vision-model decision first), sleep modifier activation (FRG-305, depends on FRG-304). See `../engineering-backlog.html`.
 
 **Also needed before shipping, not before building:**
 - Inter font files (Google Fonts, OFL license) aren't bundled yet — `ForgeType` falls back to the system font.
