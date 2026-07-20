@@ -14,15 +14,20 @@ struct TrainView: View {
                         Text("Log Workout").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
                     }
 
-                    GlassCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("REST").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-                                Text(restLabel).font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
+                    // FRG-111 — ticks every second off the current clock rather than a decremented
+                    // stored counter, so the label is always correct even after backgrounding for
+                    // a while mid-rest (a stored countdown would just freeze while backgrounded).
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        GlassCard {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("REST").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                                    Text(restLabel).font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
+                                }
+                                Spacer()
+                                Button("Reset") { store.restEndDate = Date().addingTimeInterval(105) }
+                                    .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
                             }
-                            Spacer()
-                            Button("Reset") { store.restSecondsRemaining = 105 }
-                                .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
                         }
                     }
 
@@ -55,6 +60,7 @@ struct TrainView: View {
 private struct ExerciseCard: View {
     @EnvironmentObject var store: AppStore
     let slot: ExerciseSlot
+    @State private var suggestionDismissed = false
 
     var body: some View {
         GlassCard {
@@ -62,6 +68,23 @@ private struct ExerciseCard: View {
                 Text(slot.exercise.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                 Text("\(slot.targetSets)×\(slot.targetReps) @ \(Int(slot.targetWeightKg)) kg")
                     .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+
+                // FRG-112 — reference from training history; nil until this exercise has been
+                // logged at least once before.
+                if let lastPerformance = slot.lastPerformance {
+                    Text("Last time: \(lastPerformance)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                }
+
+                // FRG-113 — editable suggestion, never auto-applied. Hidden once dismissed or once
+                // every set is already done (nothing left to apply it to).
+                if !suggestionDismissed, let suggestion = store.suggestion(for: slot), slot.sets.contains(where: { !$0.done }) {
+                    SuggestionCard(suggestion: suggestion) {
+                        store.applySuggestion(suggestion, exerciseID: slot.id)
+                        suggestionDismissed = true
+                    } onDismiss: {
+                        suggestionDismissed = true
+                    }
+                }
 
                 ForEach(slot.sets) { set in
                     SetRow(exerciseID: slot.id, set: set)
@@ -78,6 +101,34 @@ private struct ExerciseCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+private struct SuggestionCard: View {
+    let suggestion: ProgressiveOverloadEngine.Suggestion
+    let onAccept: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("SUGGESTED NEXT SET").font(ForgeType.label).foregroundStyle(ForgeColors.accent)
+            Text("\(Int(suggestion.weightKg)) kg × \(suggestion.reps)").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+            HStack(spacing: 8) {
+                Button("Accept", action: onAccept)
+                    .font(ForgeType.caption).foregroundStyle(Color.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(ForgeColors.accent).clipShape(Capsule())
+                Button("Dismiss", action: onDismiss)
+                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .overlay(Capsule().strokeBorder(ForgeColors.cardBorder))
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(10)
+        .background(ForgeColors.tileBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(ForgeColors.accent.opacity(0.4)))
     }
 }
 

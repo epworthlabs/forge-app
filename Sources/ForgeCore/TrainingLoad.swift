@@ -7,11 +7,16 @@ public struct SetLog: Sendable, Codable {
     /// tolerate missing/imported data. Defaults to 8 (a typical working-set effort) rather than 10,
     /// so an absent value doesn't silently read as max effort.
     public var rpe: Double?
+    /// Which exercise this set belongs to. Defaults to "" so existing call sites (Load Score only
+    /// ever needed weight/reps/rpe) don't break — FRG-112/221 need this to answer "what did I do
+    /// on Back Squat last time," which volume-load math alone can't.
+    public var exerciseName: String
 
-    public init(weightKg: Double, reps: Int, rpe: Double? = nil) {
+    public init(weightKg: Double, reps: Int, rpe: Double? = nil, exerciseName: String = "") {
         self.weightKg = weightKg
         self.reps = reps
         self.rpe = rpe
+        self.exerciseName = exerciseName
     }
 
     var effortFactor: Double { (rpe ?? 8) / 10 }

@@ -5,6 +5,7 @@ import PostHog
 struct ProgressTabView: View {
     @EnvironmentObject var store: AppStore
     @State private var loggingWeight = false
+    @State private var targetHitDays: Int?
 
     var body: some View {
         ZStack {
@@ -52,18 +53,27 @@ struct ProgressTabView: View {
                             HStack {
                                 Text("Target hit").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                                 Spacer()
-                                Text("5/7 days").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                if let targetHitDays {
+                                    Text("\(targetHitDays)/7 days").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                } else {
+                                    ProgressView().controlSize(.mini)
+                                }
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     Text("RECENT PRs").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-                    ForEach(["Back Squat: 225×5", "Bench Press: 165×5"], id: \.self) { pr in
-                        Text(pr).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 6)
-                            .overlay(Rectangle().fill(ForgeColors.cardBorder).frame(height: 1), alignment: .bottom)
+                    let records = store.personalRecords()
+                    if records.isEmpty {
+                        Text("Finish a workout to start tracking PRs").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    } else {
+                        ForEach(records.prefix(5), id: \.exercise) { pr in
+                            Text("\(pr.exercise): \(Int(pr.weightKg))kg × \(pr.reps)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 6)
+                                .overlay(Rectangle().fill(ForgeColors.cardBorder).frame(height: 1), alignment: .bottom)
+                        }
                     }
                 }
                 .padding(20)
@@ -73,6 +83,7 @@ struct ProgressTabView: View {
         // Goal 05 (PRD): history-depth engagement signal for the free-first paywall decision.
         .onAppear { PostHogSDK.shared.capture("progress_viewed") }
         .sheet(isPresented: $loggingWeight) { LogWeightSheet() }
+        .task { targetHitDays = await store.targetHitDaysThisWeek() }
     }
 }
 
