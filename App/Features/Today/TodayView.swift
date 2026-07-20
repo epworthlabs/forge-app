@@ -16,13 +16,41 @@ struct GlassCard<Content: View>: View {
     }
 }
 
+/// Today-only for now — the "Liquid Glass" reskin (frosted blur, oklch-derived palette, inset
+/// highlight) matches ../../../Wireframes/updated/uploads/.../TodayGlassLight+Dark.dc.html
+/// exactly. Deliberately a separate type from `GlassCard` above (used by every other screen) so
+/// this pass doesn't change anything outside Today — the plan is to roll the same system out
+/// elsewhere once this is confirmed live, not change every screen's look in one shot.
+private struct LiquidCard<Content: View>: View {
+    var cornerRadius: CGFloat = 24
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .padding(20)
+            .background(ForgeColors.cardBackground)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(ForgeColors.cardBorder, lineWidth: 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(ForgeColors.cardHighlight, lineWidth: 1)
+                    .blendMode(.plusLighter)
+                    .padding(0.5)
+            )
+            .shadow(color: ForgeColors.cardShadow, radius: 16, x: 0, y: 8)
+    }
+}
+
 struct TodayView: View {
     @EnvironmentObject var store: AppStore
     @Binding var selectedTab: MainTab
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
@@ -31,22 +59,35 @@ struct TodayView: View {
                             Text("Today").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
                         }
                         Spacer()
-                        Circle().fill(.ultraThinMaterial).frame(width: 38, height: 38)
+                        Circle()
+                            .fill(ForgeColors.avatarBackground)
+                            .overlay(Circle().strokeBorder(ForgeColors.avatarBorder, lineWidth: 1))
+                            .background(.ultraThinMaterial, in: Circle())
+                            .frame(width: 38, height: 38)
                     }
 
                     let target = store.nutritionTarget
+                    let totals = store.totals()
 
                     Button { store.sheetPresented = true } label: {
-                        GlassCard {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("NUTRITION TARGET").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-                                Text("\(Int(target.calories)) kcal").font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
+                        LiquidCard(cornerRadius: 28) {
+                            VStack(alignment: .leading, spacing: 0) {
                                 if target.calorieAdjustment != 0 {
-                                    let sign = target.calorieAdjustment > 0 ? "+" : ""
-                                    Text("\(sign)\(Int(target.calorieAdjustment)) kcal · Load \(String(format: "%.1f", target.loadScore))×")
-                                        .font(ForgeType.caption).foregroundStyle(Color.white)
-                                        .padding(.horizontal, 10).padding(.vertical, 4)
-                                        .background(ForgeColors.accent).clipShape(Capsule())
+                                    HStack(spacing: 8) {
+                                        Circle().fill(ForgeColors.accent).frame(width: 7, height: 7)
+                                        Text("Adjusted for today's training")
+                                            .font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                                    }
+                                    .padding(.bottom, 10)
+                                } else {
+                                    Text("NUTRITION TARGET").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                                        .padding(.bottom, 10)
+                                }
+
+                                HStack(spacing: 12) {
+                                    LiquidTile(label: "Calories", value: "\(Int(target.calories))",
+                                               delta: target.calorieAdjustment != 0 ? signedInt(target.calorieAdjustment) + " today" : nil)
+                                    LiquidTile(label: "Protein", value: "\(Int(target.proteinG))g", delta: nil)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,25 +97,27 @@ struct TodayView: View {
 
                     if store.hasTrainingHistory {
                         HStack(spacing: 14) {
-                            LoadRing(label: "Training load", value: String(format: "%.1f×", target.loadScore))
-                            LoadRing(label: "kcal eaten", value: "\(store.totals().kcal)")
+                            let doneSets = store.todaysExercises.flatMap(\.sets).filter(\.done).count
+                            let totalSets = store.todaysExercises.flatMap(\.sets).count
+                            RingStat(label: "Sets logged", value: "\(doneSets)/\(totalSets)",
+                                     progress: totalSets > 0 ? Double(doneSets) / Double(totalSets) : 0, color: ForgeColors.accent)
+                            RingStat(label: "kcal eaten", value: "\(totals.kcal)",
+                                     progress: target.calories > 0 ? min(1.0, Double(totals.kcal) / target.calories) : 0, color: ForgeColors.accent2)
                         }
                     }
 
-                    GlassCard {
-                        VStack(alignment: .leading, spacing: 8) {
+                    LiquidCard {
+                        VStack(alignment: .leading, spacing: 12) {
                             Text("Macros").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                            let totals = store.totals()
-                            MacroRow(label: "Protein", current: totals.protein, target: Int(target.proteinG), color: ForgeColors.ink)
-                            MacroRow(label: "Carbs", current: totals.carb, target: Int(target.carbG), color: ForgeColors.accent2)
-                            MacroRow(label: "Fat", current: totals.fat, target: Int(target.fatG), color: ForgeColors.accent3)
+                            LiquidMacroRow(label: "Protein", current: totals.protein, target: Int(target.proteinG), color: ForgeColors.accent)
+                            LiquidMacroRow(label: "Carbs", current: totals.carb, target: Int(target.carbG), color: ForgeColors.accent2)
+                            LiquidMacroRow(label: "Fat", current: totals.fat, target: Int(target.fatG), color: ForgeColors.accent3)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    GlassCard(dashed: true) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("TODAY'S WORKOUT").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                    LiquidCard {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text(store.program.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             Text(store.todaysExercises.map(\.exercise.name).joined(separator: " · "))
                                 .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).lineLimit(1)
@@ -99,28 +142,59 @@ struct TodayView: View {
         }
         .sheet(isPresented: $store.sheetPresented) { TargetExplanationSheet() }
     }
-}
 
-private struct LoadRing: View {
-    let label: String
-    let value: String
-    var body: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                Circle().stroke(ForgeColors.trackBackground, lineWidth: 4)
-                Text(value).font(ForgeType.title).foregroundStyle(ForgeColors.ink)
-            }
-            .frame(width: 74, height: 74)
-            Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    private func signedInt(_ value: Double) -> String {
+        let sign = value >= 0 ? "+" : ""
+        return "\(sign)\(Int(value))"
     }
 }
 
-private struct MacroRow: View {
+private struct LiquidTile: View {
+    let label: String
+    let value: String
+    let delta: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            Text(value).font(.system(size: 20, weight: .bold)).foregroundStyle(ForgeColors.ink)
+            if let delta {
+                Text(delta).font(ForgeType.caption).fontWeight(.semibold).foregroundStyle(ForgeColors.accent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(ForgeColors.tileBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(ForgeColors.tileBorder, lineWidth: 1))
+    }
+}
+
+private struct RingStat: View {
+    let label: String
+    let value: String
+    let progress: Double
+    let color: Color
+    var body: some View {
+        LiquidCard {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle().stroke(ForgeColors.ringTrack, lineWidth: 8)
+                    Circle()
+                        .trim(from: 0, to: max(0.001, min(1, progress)))
+                        .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Circle().fill(ForgeColors.ringFillBackground).padding(9)
+                    Text(value).font(.system(size: 14, weight: .bold)).foregroundStyle(ForgeColors.ink)
+                }
+                .frame(width: 74, height: 74)
+                Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private struct LiquidMacroRow: View {
     let label: String
     let current: Int
     let target: Int
