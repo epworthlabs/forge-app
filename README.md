@@ -124,6 +124,13 @@ All five: `swift test` (38/38, ForgeCore untouched this round) + `xcodebuild` BU
 
 All five: `swift test` (43/43) + `xcodebuild` BUILD SUCCEEDED + fresh install/launch confirmed clean, and the gradient wash + frosted onboarding cards visually confirmed live via Simulator screenshot. Functional pieces (future-weeks scoping, numpad weight entry, Lift Progressions, target-driven calories) are build-verified only, not tap-through verified.
 
+**Round eight — small fixes (2026-07-20)** (FRG-327, FRG-328):
+
+- **FRG-327 cut "training days per week"**: audited (per a direct question — "what's the point of having training days per week in the onboarding screen?") and confirmed it was dead: `trainingDaysPerWeek` was set by that step and read only by its own UI, never passed to `buildProfile()`, never stored on `UserProfile`, never used to filter or recommend a program. Removed the step and the property outright rather than wiring it up after the fact — onboarding is 4 steps now (was 5).
+- **FRG-328 Progress fixes**: Lift Progression (FRG-324) is now collapsible (`DisclosureGroup`, defaults open). Real bug found and fixed in the workout calendar: `WorkoutCalendarView.weekdaySymbols` used `Calendar.veryShortWeekdaySymbols`, which is always Sun–Sat regardless of locale — but the day-cell grid already correctly shifts its leading blank cells by `calendar.firstWeekday`. On any locale where the week starts Monday (most of Europe, among others), the S/M/T/W/T/F/S header was lined up with the wrong columns. Fixed by rotating the header symbols to match `firstWeekday` the same way the grid already does.
+
+`swift test` (43/43) + `xcodebuild` BUILD SUCCEEDED + fresh install/launch confirmed clean.
+
 **Not started:** the program editor doesn't expose deload scheduling in its UI yet (only the curated 5/3/1 template has `deloadEveryNWeeks` set, via direct construction). See `../engineering-backlog.html`.
 
 **Also needed before shipping, not before building:**

@@ -105,7 +105,6 @@ final class OnboardingViewModel: ObservableObject {
     // whatever `weightLb` was at that point rather than some arbitrary unrelated number.
     @Published var targetWeightLb: Double?
     @Published var targetWeeks: Int = 12
-    @Published var trainingDaysPerWeek: Int?
     @Published var selectedProgram: ProgramTemplate?
 
     var canContinueFromAboutYou: Bool { sex != nil }

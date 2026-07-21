@@ -8,6 +8,7 @@ struct ProgressTabView: View {
     @State private var loggingWeight = false
     @State private var targetHitDays: Int?
     @State private var trainingHistoryExpanded = false
+    @State private var liftProgressionExpanded = true
 
     var body: some View {
         ZStack {
@@ -66,12 +67,18 @@ struct ProgressTabView: View {
                     }
 
                     // Feature request — "get rid of recent PR's section and replace it with lift
-                    // progressions." Promoted out of the collapsed disclosure below (where it
-                    // used to live alongside the calendar) into the main, always-visible flow —
-                    // this is now the primary lift-tracking view, not a buried extra.
+                    // progressions" (promoted out of the collapsed disclosure it used to share
+                    // with the calendar), then "make lift progression collapsable" — defaults
+                    // open since it's the primary lift-tracking view now, not a buried extra.
                     GlassCard {
-                        LiftProgressionView(sessions: store.trailingSessions)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        DisclosureGroup("LIFT PROGRESSION", isExpanded: $liftProgressionExpanded) {
+                            LiftProgressionView(sessions: store.trailingSessions)
+                                .padding(.top, 10)
+                        }
+                        .font(ForgeType.label)
+                        .foregroundStyle(ForgeColors.inkMuted)
+                        .tint(ForgeColors.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     // Feature request — calendar of training days. Collapsed by default: denser,
@@ -192,7 +199,15 @@ private struct WorkoutCalendarView: View {
         return formatter.string(from: displayedMonth)
     }
 
-    private var weekdaySymbols: [String] { calendar.veryShortWeekdaySymbols }
+    // Bug fix — `veryShortWeekdaySymbols` is always Sun...Sat regardless of locale, but the grid
+    // below already shifts its leading blanks by `calendar.firstWeekday` (Monday-first in most
+    // non-US locales). Without rotating the header to match, the S/M/T/W/T/F/S labels lined up
+    // with the wrong columns everywhere the week doesn't start on Sunday.
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortWeekdaySymbols
+        let startIndex = calendar.firstWeekday - 1
+        return Array(symbols[startIndex...] + symbols[..<startIndex])
+    }
 
     /// Every `sessionDates` day-of-month that falls within `displayedMonth`'s year+month —
     /// intentionally not full `Date` equality, since a calendar cell only knows the day number.
@@ -247,8 +262,6 @@ private struct LiftProgressionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("LIFT PROGRESSION").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-
             if exerciseNames.isEmpty {
                 Text("Finish a workout to see lift progression").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             } else {

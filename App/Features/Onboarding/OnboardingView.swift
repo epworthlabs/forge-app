@@ -10,8 +10,8 @@ struct OnboardingView: View {
         ZStack {
             ForgeColors.backgroundWash
             VStack(alignment: .leading, spacing: 18) {
-                StepDots(current: model.step, total: 5)
-                Text("Step \(model.step) of 5")
+                StepDots(current: model.step, total: 4)
+                Text("Step \(model.step) of 4")
                     .font(ForgeType.label)
                     .foregroundStyle(ForgeColors.accent)
                     .textCase(.uppercase)
@@ -21,7 +21,6 @@ struct OnboardingView: View {
                     case 1: AboutYouStep(model: model)
                     case 2: BodyActivityStep(model: model)
                     case 3: GoalStep(model: model)
-                    case 4: TrainingDaysStep(model: model)
                     default: ProgramSelectStep(model: model, onComplete: onComplete)
                     }
                 }
@@ -302,39 +301,6 @@ private struct GoalStep: View {
                 .padding(.top, 4)
             }
             .padding(.bottom, 12)
-        }
-    }
-}
-
-private struct TrainingDaysStep: View {
-    @ObservedObject var model: OnboardingViewModel
-    let columns = [GridItem(.adaptive(minimum: 52))]
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Training days per week?").font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
-            LazyVGrid(columns: columns, spacing: 10) {
-                ForEach(2...6, id: \.self) { n in
-                    Button {
-                        model.trainingDaysPerWeek = n
-                    } label: {
-                        Text("\(n)")
-                            .font(ForgeType.title)
-                            .frame(width: 52, height: 52)
-                            .foregroundStyle(model.trainingDaysPerWeek == n ? .white : ForgeColors.ink)
-                            .background {
-                                model.trainingDaysPerWeek == n
-                                    ? AnyView(ForgeColors.accent)
-                                    : AnyView(Rectangle().fill(.ultraThinMaterial))
-                            }
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            Spacer()
-            ContinueButton(title: "Continue", enabled: model.trainingDaysPerWeek != nil) {
-                model.step = 5
-            }
         }
     }
 }
