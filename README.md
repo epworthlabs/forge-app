@@ -184,11 +184,29 @@ All five: `swift test` (43/43) + `xcodebuild` BUILD SUCCEEDED + fresh install/la
 
 `swift test` (46/46) + `xcodebuild` BUILD SUCCEEDED for both. FRG-345 also confirmed via fresh install/launch (Train and the program editor's numeric fields visually match the pre-FRG-335 style). FRG-346's UI confirmed via the temporary debug-bypass screenshots described above; the actual redeem→unlock round trip is not yet live-testable pending the Render deploy.
 
-**Not started:** the program editor doesn't expose deload scheduling in its UI yet (only the curated 5/3/1 template has `deloadEveryNWeeks` set, via direct construction). See `../engineering-backlog.html`.
+**App Store launch-readiness pass (2026-07-21)** — worked through the full punch list of what's needed before this can actually be submitted, not just feature-complete in Simulator:
+
+- **Privacy manifest**: added `App/PrivacyInfo.xcprivacy` — Apple has required this since 2024 for any required-reason API usage. Declares `UserDefaults` (category `NSPrivacyAccessedAPICategoryUserDefaults`, reason `CA92.1` — own-app data only, confirmed by grepping for any file-timestamp/disk-space/boot-time APIs too, none found) and the app's actual collected data types (Health, Fitness, Product Interaction for PostHog), all `AppFunctionality`/`Analytics` purpose, none used for tracking.
+- **Privacy policy + support URL**: both required by App Store Connect. Hosted as static pages on the same Render service already deployed for FatSecret (`FoodProxy/public/privacy.html`, `support.html`, served via new `/privacy` and `/support` routes) rather than standing up a separate site.
+- **Real-device signing**: `project.yml` had `CODE_SIGN_STYLE: Automatic` but no team, so Automatic signing had nothing to resolve — this is what actually blocked archiving, not the Apple Sign-In entitlement that got blamed and disconnected earlier. Added `DEVELOPMENT_TEAM: 88XVUU2829` (the team already confirmed working for real-device CloudKit verification, FRG-130/131), plus explicit `MARKETING_VERSION`/`CURRENT_PROJECT_VERSION`.
+- **Sign in with Apple re-enabled**: per the original plan ("we can add it back when we launch") — `com.apple.developer.applesignin` back in `project.yml`, `RootView` gates on `AppleSignInManager.isSignedIn` again. Doesn't block Simulator builds this time since the missing team ID (the actual cause) is fixed.
+- **Nutrition/medical disclaimer**: added to onboarding's Goal step and the Target Explanation sheet — "estimates, not medical advice, talk to a doctor or registered dietitian."
+- **Deload scheduling UI**: `ProgramEditorView` gained a "Scheduled deloads" toggle + interval field, so `ProgramTemplate.deloadEveryNWeeks` (FRG-206) is finally settable from a custom program, not just the curated 5/3/1 template's direct construction.
+
+All verified via `swift test` (46/46) + `xcodebuild` BUILD SUCCEEDED + the temporary-debug-bypass screenshot technique used earlier for the referral gate (added, screenshotted, fully reverted — confirmed via `git diff` each time).
+
+**Still needs a human, not more code:**
+- **CloudKit Production schema promotion** — no tool access to the CloudKit Dashboard (needs your Apple ID login). Everything so far has run against the *Development* environment only. Before the first release build:
+  1. Open [CloudKit Dashboard](https://icloud.developer.apple.com/dashboard/), select the `iCloud.com.epworthlabs.forge` container.
+  2. In the **Schema** section (Development environment), confirm these record types exist (they're created automatically the first time the app saves one, so use the app in Simulator/device first if any are missing): `Profile`, `WorkoutSession`, `FoodEntry`, `BodyweightEntry`.
+  3. On `FoodEntry.date`, add the **Queryable** index (used by a `date >=/<` range predicate).
+  4. On `BodyweightEntry.date`, add the **Sortable** index (used by an ascending sort) — add **Queryable** too, since CloudKit predicates on unindexed fields fail outright rather than degrading.
+  5. Use **Deploy Schema Changes** to push the Development schema (including these two indexes) to **Production**. This is a one-way promotion Apple doesn't let you undo from the dashboard — re-check the indexes above before confirming.
+  6. Production and Development are entirely separate datastores — nothing you've tested in Simulator this whole session carries over. Do one real save-and-fetch smoke test against Production (e.g. a TestFlight build) before submitting.
+- **App Store Connect listing** — screenshots, description, age rating: still needs a human in the Apple Developer portal. See the draft copy and screenshots below.
 
 **Also needed before shipping, not before building:**
 - Inter font files (Google Fonts, OFL license) aren't bundled yet — `ForgeType` falls back to the system font.
 - Exercise demo images/GIFs aren't bundled — raise with design rather than pulling in an uncertain third-party asset set.
 - The floating glassmorphic tab bar was simplified to a native `TabView` for now.
 - `App/Config/Secrets.swift` is gitignored and currently holds real, working keys for USDA, FatSecret's proxy (deployed at `https://forge-food-proxy.onrender.com`), and PostHog. Copy `Secrets.example.swift` if `Secrets.swift` is ever missing.
-- Barcode scanning (`BarcodeScannerView`) uses VisionKit's `DataScannerViewController`, which reports unsupported in Simulator (no camera) — that fallback path is what's actually verified here; the real scan needs a physical device.

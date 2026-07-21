@@ -1,5 +1,8 @@
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 // .trim() defensively — a leading space pasted into Render's env var UI once silently broke the
 // Base64 Basic-Auth header sent to FatSecret (invalid_client), and wasn't visible in the
@@ -52,6 +55,11 @@ const app = express();
 app.use(express.json());
 
 app.get("/health", (req, res) => res.status(200).send("ok"));
+
+// App Store Connect requires a Privacy Policy URL and a Support URL — hosted here since this
+// service already has a real, deployed domain and there's no other public-facing site.
+app.get("/privacy", (req, res) => res.sendFile(path.join(__dirname, "public", "privacy.html")));
+app.get("/support", (req, res) => res.sendFile(path.join(__dirname, "public", "support.html")));
 
 // Feature request — "place a referral wall on the lift progression section... if that person
 // signs up, unlock this feature." No account system exists (Sign in with Apple is disconnected,

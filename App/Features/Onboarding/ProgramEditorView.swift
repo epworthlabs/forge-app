@@ -18,12 +18,18 @@ struct ProgramEditorView: View {
     @State private var selectedWeek: Int = 1
     @State private var pickingExerciseForDayID: String?
     @State private var copyConfirmationShown = false
+    // FRG-206 — previously only settable via direct construction (the curated 5/3/1 template);
+    // exposed here so a custom program can schedule deloads too.
+    @State private var deloadEnabled: Bool
+    @State private var deloadEveryNWeeks: Int
 
     init(existingProgram: ProgramTemplate? = nil, onSave: @escaping (ProgramTemplate) -> Void) {
         self.existingProgram = existingProgram
         self.onSave = onSave
         _programName = State(initialValue: existingProgram?.name ?? "My Program")
         _weekCount = State(initialValue: existingProgram?.weekCount ?? 8)
+        _deloadEnabled = State(initialValue: existingProgram?.deloadEveryNWeeks != nil)
+        _deloadEveryNWeeks = State(initialValue: existingProgram?.deloadEveryNWeeks ?? 4)
         if let existingProgram {
             var seeded: [Int: [ProgramDay]] = [:]
             for week in 1...max(1, existingProgram.weekCount) {
@@ -72,6 +78,25 @@ struct ProgramEditorView: View {
                                     if selectedWeek > clamped { selectedWeek = clamped }
                                 }
                             ), range: 1...52, suffix: "wk")
+                        }
+                        .padding(12)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        // FRG-206 — scheduled deloads, previously only settable on the curated
+                        // 5/3/1 template via direct construction, not from the editor.
+                        VStack(alignment: .leading, spacing: 10) {
+                            Toggle(isOn: $deloadEnabled) {
+                                Text("Scheduled deloads").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            }
+                            .tint(ForgeColors.accent)
+                            if deloadEnabled {
+                                HStack {
+                                    Text("Every").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                    Spacer()
+                                    NumberField(value: $deloadEveryNWeeks, range: 2...12, suffix: "wk")
+                                }
+                            }
                         }
                         .padding(12)
                         .background(.ultraThinMaterial)
@@ -175,7 +200,7 @@ struct ProgramEditorView: View {
         return ProgramTemplate(
             id: existingProgram?.id ?? UUID().uuidString, name: programName, weekCount: weekCount,
             defaultDays: defaultDays.filter { !$0.exercises.isEmpty }, weekOverrides: overrides,
-            deloadEveryNWeeks: existingProgram?.deloadEveryNWeeks
+            deloadEveryNWeeks: deloadEnabled ? deloadEveryNWeeks : nil
         )
     }
 }

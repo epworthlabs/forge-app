@@ -308,6 +308,9 @@ private struct GoalStep: View {
                         .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                 }
 
+                Text("These targets are estimates, not medical advice — talk to a doctor or registered dietitian before making significant changes to your diet.")
+                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+
                 ContinueButton(title: "Continue", enabled: model.canContinueFromGoal) {
                     model.step = 4
                 }

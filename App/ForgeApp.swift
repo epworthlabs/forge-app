@@ -30,12 +30,24 @@ struct RootView: View {
     // toggle labeled "Dark Mode" reads as an explicit override in both directions, not
     // dark-vs-system.
     @AppStorage("forceDarkMode") private var forceDarkMode = false
+    // Re-wired for launch — was disconnected earlier this session only because the missing
+    // DEVELOPMENT_TEAM (see project.yml) made Automatic signing fail on Simulator too; now that
+    // team is set, this no longer blocks Simulator builds the way it did before.
+    @StateObject private var signIn = AppleSignInManager.shared
+    @State private var isRefreshingSignIn = true
     @State private var store: AppStore?
     @State private var isLoadingProfile = true
 
     var body: some View {
         Group {
-            if isLoadingProfile {
+            if isRefreshingSignIn {
+                ZStack {
+                    ForgeColors.backgroundWash
+                    ProgressView()
+                }
+            } else if !signIn.isSignedIn {
+                SignInView()
+            } else if isLoadingProfile {
                 ZStack {
                     ForgeColors.backgroundWash
                     ProgressView()
@@ -54,6 +66,12 @@ struct RootView: View {
         }
         .preferredColorScheme(forceDarkMode ? .dark : .light)
         .task {
+            // Re-validated against Apple's servers, not just a locally-cached flag — catches a
+            // sign-in revoked from Apple ID settings since last launch.
+            await signIn.refreshSignInState()
+            isRefreshingSignIn = false
+        }
+        .task {
             // FRG-130/131 — a returning user with a saved CloudKit profile skips onboarding
             // entirely; a brand-new user (or one without CloudKit access yet) sees it as before.
             if let (profile, program, savedPrograms, dayIndex, programStartDate) = try? await CloudKitStore.shared.fetchProfile() {
@@ -65,9 +83,3 @@ struct RootView: View {
         }
     }
 }
-
-// Sign in with Apple (AppleSignInManager.swift / SignInView.swift) — built, deliberately
-// disconnected from RootView for now: it was blocking Simulator testing (see git history for the
-// signing/provisioning saga). Re-wire the gate above once ready to launch: `@StateObject private
-// var signIn = AppleSignInManager.shared`, show `SignInView()` while `!signIn.isSignedIn`, and
-// re-add the `com.apple.developer.applesignin` entitlement to project.yml.

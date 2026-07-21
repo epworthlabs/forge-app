@@ -34,6 +34,9 @@ struct TargetExplanationSheet: View {
                 Text("Your target was held at a safety floor today rather than reduced further, regardless of Load Score.")
                     .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).padding(.top, 8)
             }
+
+            Text("Trakt's targets are estimates based on general formulas, not medical advice. Talk to a doctor or registered dietitian before making significant changes to your diet.")
+                .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).padding(.top, 12)
         }
         .padding(22)
         .presentationDetents([.medium])

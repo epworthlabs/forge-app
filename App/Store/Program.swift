@@ -30,7 +30,7 @@ struct ProgramTemplate: Identifiable, Hashable, Codable {
     var weekCount: Int
     var defaultDays: [ProgramDay]
     var weekOverrides: [Int: [ProgramDay]] = [:]
-    // FRG-206 — nil means no scheduled deloads (the default; not exposed in the editor UI yet).
+    // FRG-206 — nil means no scheduled deloads (the default).
     var deloadEveryNWeeks: Int? = nil
 
     /// 1-indexed week number. Out-of-range weeks (program ran longer than its own timeframe)
