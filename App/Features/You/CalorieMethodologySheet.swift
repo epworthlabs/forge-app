@@ -9,7 +9,7 @@ struct CalorieMethodologySheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                ForgeColors.backgroundBase.ignoresSafeArea()
+                ForgeColors.backgroundWash
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         Text("Your calorie target is built in layers, each one adjusting the number the layer before it produced. Nothing here is guessed — every step is a fixed formula or a value you can see move over time.")
@@ -21,7 +21,7 @@ struct CalorieMethodologySheet: View {
                         )
                         MethodologySection(
                             step: "2", title: "Goal adjustment",
-                            body: "Maintenance is adjusted for your stated goal: cut −20%, bulk +12.5%, maintain/recomp unchanged. This is the baseline the rest of the app works from."
+                            body: "If you set a target weight and time period (cut or bulk), maintenance is adjusted by exactly the daily deficit or surplus that target implies — fixed until you change your goal or target in You → Goal & Target, not recalculated day to day. Without a target set, maintenance uses a flat adjustment instead: cut −20%, bulk +12.5%, maintain/recomp unchanged. Either way, this is the baseline the rest of the app works from."
                         )
                         MethodologySection(
                             step: "3", title: "Weekly trend recalibration",

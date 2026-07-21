@@ -14,7 +14,7 @@ struct FoodSearchView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                ForgeColors.backgroundBase.ignoresSafeArea()
+                ForgeColors.backgroundWash
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         TextField("Search…", text: $query)

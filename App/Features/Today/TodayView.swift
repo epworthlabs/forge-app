@@ -1,49 +1,6 @@
 import SwiftUI
 import ForgeCore
 
-struct GlassCard<Content: View>: View {
-    var dashed: Bool = false
-    @ViewBuilder var content: Content
-    var body: some View {
-        content
-            .padding(18)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(ForgeColors.cardBorder, style: StrokeStyle(lineWidth: 1, dash: dashed ? [5, 4] : []))
-            )
-    }
-}
-
-/// Today-only for now — the "Liquid Glass" reskin (frosted blur, oklch-derived palette, inset
-/// highlight) matches ../../../Wireframes/updated/uploads/.../TodayGlassLight+Dark.dc.html
-/// exactly. Deliberately a separate type from `GlassCard` above (used by every other screen) so
-/// this pass doesn't change anything outside Today — the plan is to roll the same system out
-/// elsewhere once this is confirmed live, not change every screen's look in one shot.
-private struct LiquidCard<Content: View>: View {
-    var cornerRadius: CGFloat = 24
-    @ViewBuilder var content: Content
-    var body: some View {
-        content
-            .padding(20)
-            .background(ForgeColors.cardBackground)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(ForgeColors.cardBorder, lineWidth: 1)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(ForgeColors.cardHighlight, lineWidth: 1)
-                    .blendMode(.plusLighter)
-                    .padding(0.5)
-            )
-            .shadow(color: ForgeColors.cardShadow, radius: 16, x: 0, y: 8)
-    }
-}
-
 struct TodayView: View {
     @EnvironmentObject var store: AppStore
     @Binding var selectedTab: MainTab
@@ -70,7 +27,7 @@ struct TodayView: View {
                     let totals = store.totals()
 
                     Button { store.sheetPresented = true } label: {
-                        LiquidCard(cornerRadius: 28) {
+                        GlassCard(cornerRadius: 28) {
                             VStack(alignment: .leading, spacing: 0) {
                                 if target.calorieAdjustment != 0 {
                                     HStack(spacing: 8) {
@@ -87,7 +44,7 @@ struct TodayView: View {
                                 HStack(spacing: 12) {
                                     LiquidTile(label: "Calories", value: "\(Int(target.calories))",
                                                delta: target.calorieAdjustment != 0 ? signedInt(target.calorieAdjustment) + " today" : nil)
-                                    LiquidTile(label: "Protein", value: "\(Int(target.proteinG))g", delta: nil)
+                                    LiquidTile(label: "Protein", value: "\(Int(target.proteinG))g")
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -106,7 +63,7 @@ struct TodayView: View {
                         }
                     }
 
-                    LiquidCard {
+                    GlassCard {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Macros").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             LiquidMacroRow(label: "Protein", current: totals.protein, target: Int(target.proteinG), color: ForgeColors.accent)
@@ -116,7 +73,7 @@ struct TodayView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    LiquidCard {
+                    GlassCard {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(store.currentProgramDayName).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             Text(store.todaysExercises.map(\.exercise.name).joined(separator: " · "))
@@ -132,8 +89,8 @@ struct TodayView: View {
                     }
 
                     HStack(spacing: 10) {
-                        QuickAction(title: "+ Log food") { selectedTab = .eat }
-                        QuickAction(title: "+ Log weight") { selectedTab = .progress }
+                        DashedActionButton(title: "+ Log food") { selectedTab = .eat }
+                        DashedActionButton(title: "+ Log weight") { selectedTab = .progress }
                     }
                 }
                 .padding(20)
@@ -146,86 +103,5 @@ struct TodayView: View {
     private func signedInt(_ value: Double) -> String {
         let sign = value >= 0 ? "+" : ""
         return "\(sign)\(Int(value))"
-    }
-}
-
-private struct LiquidTile: View {
-    let label: String
-    let value: String
-    let delta: String?
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-            Text(value).font(.system(size: 20, weight: .bold)).foregroundStyle(ForgeColors.ink)
-            if let delta {
-                Text(delta).font(ForgeType.caption).fontWeight(.semibold).foregroundStyle(ForgeColors.accent)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(ForgeColors.tileBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(ForgeColors.tileBorder, lineWidth: 1))
-    }
-}
-
-private struct RingStat: View {
-    let label: String
-    let value: String
-    let progress: Double
-    let color: Color
-    var body: some View {
-        LiquidCard {
-            VStack(spacing: 8) {
-                ZStack {
-                    Circle().stroke(ForgeColors.ringTrack, lineWidth: 8)
-                    Circle()
-                        .trim(from: 0, to: max(0.001, min(1, progress)))
-                        .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    Circle().fill(ForgeColors.ringFillBackground).padding(9)
-                    Text(value).font(.system(size: 14, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                }
-                .frame(width: 74, height: 74)
-                Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-}
-
-private struct LiquidMacroRow: View {
-    let label: String
-    let current: Int
-    let target: Int
-    let color: Color
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).frame(width: 56, alignment: .leading)
-            GeometryReader { geo in
-                let pct = target > 0 ? min(1.0, Double(current) / Double(target)) : 0
-                ZStack(alignment: .leading) {
-                    Capsule().fill(ForgeColors.trackBackground)
-                    Capsule().fill(color).frame(width: geo.size.width * pct)
-                }
-            }
-            .frame(height: 8)
-            Text("\(current)/\(target)g").font(ForgeType.caption).foregroundStyle(ForgeColors.ink).frame(width: 76, alignment: .trailing)
-        }
-    }
-}
-
-private struct QuickAction: View {
-    let title: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Text(title).font(ForgeType.body).frame(maxWidth: .infinity)
-                .padding(14).foregroundStyle(ForgeColors.ink)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(ForgeColors.cardBorder, style: StrokeStyle(dash: [5, 4])))
-        }
-        .buttonStyle(.plain)
     }
 }

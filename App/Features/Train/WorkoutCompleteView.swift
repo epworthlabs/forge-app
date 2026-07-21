@@ -18,7 +18,7 @@ struct WorkoutCompleteView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             VStack(spacing: 24) {
                 Spacer()
                 Image(systemName: "checkmark.seal.fill")

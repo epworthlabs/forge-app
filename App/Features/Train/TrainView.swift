@@ -65,7 +65,7 @@ struct TrainSessionView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
@@ -101,12 +101,7 @@ struct TrainSessionView: View {
 
                     // Feature request — session-only: adds to today's workout, doesn't touch the
                     // program definition (see AppStore.addExercise doc comment).
-                    Button { addingExercise = true } label: {
-                        Text("+ Add Exercise").font(ForgeType.body).frame(maxWidth: .infinity)
-                            .padding(14).foregroundStyle(ForgeColors.inkMuted)
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(ForgeColors.cardBorder, style: StrokeStyle(dash: [5, 4])))
-                    }
-                    .buttonStyle(.plain)
+                    DashedActionButton(title: "+ Add Exercise") { addingExercise = true }
 
                     Button {
                         store.finishWorkout()
@@ -302,11 +297,12 @@ private struct ExerciseCard: View {
 
                 if editingSets {
                     // Feature request — a dedicated, visible confirm action rather than only the
-                    // toggle buried in the ⋯ menu; also the point at which we ask whether these
-                    // set/rep/weight edits should carry forward into the program itself.
+                    // toggle buried in the ⋯ menu. Deliberately does NOT trigger the future-weeks
+                    // prompt: "ask... don't do this for edits" — that prompt is reserved for
+                    // swap/add/remove (a change to which exercises are on the day), not a
+                    // sets/reps/weight tweak to an exercise that's already there.
                     Button {
                         editingSets = false
-                        showFutureWeeksPrompt = true
                     } label: {
                         Text("Done Editing").font(ForgeType.body).frame(maxWidth: .infinity)
                             .padding(12).foregroundStyle(Color.white).background(ForgeColors.accent)
@@ -415,12 +411,13 @@ private struct EditableSetRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Stepper(value: Binding(
+            // Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb
+            // increments as well." Typed entry for getting to a specific number fast, plus the
+            // existing quick-adjust buttons for small in-set corrections.
+            WeightNumberField(weightLb: Binding(
                 get: { WeightUnit.lb(fromKg: set.weightKg) },
                 set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: WeightUnit.kg(fromLb: $0), reps: set.reps) }
-            ), in: 0...1100, step: 5) {
-                Text("\(WeightUnit.roundedLb(fromKg: set.weightKg)) lb").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-            }
+            ))
             Stepper(value: Binding(
                 get: { set.reps },
                 set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
@@ -437,6 +434,44 @@ private struct EditableSetRow: View {
         .padding(9)
         .background(ForgeColors.tileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+/// Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb increments
+/// as well." A digit-filtered numeric-keypad TextField for typing an exact number directly,
+/// flanked by the existing quick-adjust buttons for small corrections mid-set.
+private struct WeightNumberField: View {
+    @Binding var weightLb: Double
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { weightLb = max(0, weightLb - 5) } label: {
+                Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 3) {
+                TextField("", text: Binding(
+                    get: { String(Int(weightLb.rounded())) },
+                    set: { newText in
+                        let digits = newText.filter(\.isNumber)
+                        weightLb = min(1100, max(0, Double(digits) ?? 0))
+                    }
+                ))
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                .frame(width: 34)
+                Text("lb").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+
+            Button { weightLb = min(1100, weightLb + 5) } label: {
+                Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 

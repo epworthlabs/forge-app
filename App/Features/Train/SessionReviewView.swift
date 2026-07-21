@@ -22,7 +22,7 @@ struct SessionReviewView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if let session {

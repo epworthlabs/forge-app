@@ -12,7 +12,7 @@ struct DaySelectionView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {

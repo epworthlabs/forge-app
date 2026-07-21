@@ -45,7 +45,7 @@ struct ProgramEditorView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                ForgeColors.backgroundBase.ignoresSafeArea()
+                ForgeColors.backgroundWash
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         TextField("Program name", text: $programName)
@@ -305,7 +305,7 @@ struct ExercisePickerSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                ForgeColors.backgroundBase.ignoresSafeArea()
+                ForgeColors.backgroundWash
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         TextField("Search exercises…", text: $query)

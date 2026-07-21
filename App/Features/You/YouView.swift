@@ -7,10 +7,11 @@ struct YouView: View {
     @AppStorage("remindersEnabled") private var remindersEnabled = false
     @AppStorage("healthSyncEnabled") private var healthSyncEnabled = false
     @State private var showingMethodology = false
+    @State private var editingGoalTarget = false
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("You").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
@@ -35,7 +36,13 @@ struct YouView: View {
                             .padding(.vertical, 9)
                             Divider().overlay(ForgeColors.cardBorder)
 
-                            SettingsRow(title: "Edit Preferences")
+                            // Feature request — "this figure should not change unless these
+                            // settings are changed in the app" implies somewhere in the app to
+                            // change them; previously this row didn't do anything.
+                            Button { editingGoalTarget = true } label: {
+                                SettingsRow(title: "Goal & Target")
+                            }
+                            .buttonStyle(.plain)
                             Divider().overlay(ForgeColors.cardBorder)
 
                             Toggle(isOn: $remindersEnabled) {
@@ -112,6 +119,7 @@ struct YouView: View {
         }
         .preferredColorScheme(forceDarkMode ? .dark : nil)
         .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
+        .sheet(isPresented: $editingGoalTarget) { GoalTargetEditSheet() }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than
             // only right after the toggle flips.

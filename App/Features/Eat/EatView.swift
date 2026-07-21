@@ -7,7 +7,7 @@ struct EatView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .firstTextBaseline) {

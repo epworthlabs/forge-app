@@ -14,7 +14,7 @@ struct ProgramSelectionView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Train").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)

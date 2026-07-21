@@ -42,8 +42,18 @@ public struct UserProfile: Sendable, Codable {
     public var goal: Goal
     /// Fat-free mass in kg. If unknown, approximated from bodyweight for the RED-S floor check.
     public var fatFreeMassKg: Double?
+    // Feature request — "add in a section asking them about their target weight and time period
+    // as well. Use those to calculate their daily caloric intake." When both are set (cut/bulk
+    // only — maintain/recomp don't have a literal weight target), these drive the calorie
+    // deficit/surplus directly instead of Goal's fixed percentage; see
+    // TDEECalculator.goalAdjustedTDEE. `weightKg` above is the anchor "starting point" for that
+    // math — deliberately not re-derived from later weigh-ins, so the resulting daily calorie
+    // figure stays fixed until the user explicitly changes goal/target/timeframe again.
+    public var targetWeightKg: Double?
+    public var targetWeeks: Int?
 
-    public init(weightKg: Double, heightCm: Double, age: Int, sex: Sex, activityLevel: ActivityLevel, goal: Goal, fatFreeMassKg: Double? = nil) {
+    public init(weightKg: Double, heightCm: Double, age: Int, sex: Sex, activityLevel: ActivityLevel, goal: Goal,
+                fatFreeMassKg: Double? = nil, targetWeightKg: Double? = nil, targetWeeks: Int? = nil) {
         self.weightKg = weightKg
         self.heightCm = heightCm
         self.age = age
@@ -51,6 +61,8 @@ public struct UserProfile: Sendable, Codable {
         self.activityLevel = activityLevel
         self.goal = goal
         self.fatFreeMassKg = fatFreeMassKg
+        self.targetWeightKg = targetWeightKg
+        self.targetWeeks = targetWeeks
     }
 
     /// Falls back to 80% of bodyweight when body composition isn't known.

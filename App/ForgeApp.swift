@@ -26,7 +26,7 @@ struct RootView: View {
         Group {
             if isLoadingProfile {
                 ZStack {
-                    ForgeColors.backgroundBase.ignoresSafeArea()
+                    ForgeColors.backgroundWash
                     ProgressView()
                 }
             } else if let store {

@@ -194,6 +194,19 @@ final class AppStore: ObservableObject {
         persistProfile()
     }
 
+    // Feature request — "this figure should not change unless these settings are changed in the
+    // app." The one and only place, besides onboarding, that's allowed to move the target-driven
+    // calorie baseline: an explicit edit here, not a side effect of logging a new weigh-in or
+    // finishing a workout. `targetWeightKg`/`targetWeeks` are re-anchored to `profile.weightKg`
+    // as it stands right now — same "fixed until you touch it again" contract as onboarding's.
+    func updateGoalAndTarget(goal: Goal, targetWeightLb: Double?, targetWeeks: Int?) {
+        let hasWeightTarget = goal == .cut || goal == .bulk
+        profile.goal = goal
+        profile.targetWeightKg = hasWeightTarget ? targetWeightLb.map { $0 * 0.45359237 } : nil
+        profile.targetWeeks = hasWeightTarget ? targetWeeks : nil
+        persistProfile()
+    }
+
     private func replaceInSavedPrograms(_ updated: ProgramTemplate) {
         if let idx = savedPrograms.firstIndex(where: { $0.id == updated.id }) {
             savedPrograms[idx] = updated
@@ -235,26 +248,6 @@ final class AppStore: ObservableObject {
     }
 
     var hasTrainingHistory: Bool { !trailingSessions.isEmpty }
-
-    // FRG-221 — real per-exercise records from training history, replacing what was previously a
-    // hardcoded "Back Squat: 225×5" placeholder in the Progress tab. Heaviest set wins; ties break
-    // toward more reps at that weight.
-    func personalRecords() -> [(exercise: String, weightKg: Double, reps: Int)] {
-        var best: [String: SetLog] = [:]
-        for session in trailingSessions {
-            for set in session.sets where !set.exerciseName.isEmpty {
-                if let current = best[set.exerciseName] {
-                    if set.weightKg > current.weightKg || (set.weightKg == current.weightKg && set.reps > current.reps) {
-                        best[set.exerciseName] = set
-                    }
-                } else {
-                    best[set.exerciseName] = set
-                }
-            }
-        }
-        return best.map { (exercise: $0.key, weightKg: $0.value.weightKg, reps: $0.value.reps) }
-            .sorted { $0.weightKg > $1.weightKg }
-    }
 
     func allFoodEntriesToday() -> [FoodEntry] {
         Meal.allCases.flatMap { mealEntries[$0] ?? [] }

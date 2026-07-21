@@ -11,7 +11,7 @@ struct ProgressTabView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Progress").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
@@ -65,28 +65,21 @@ struct ProgressTabView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    Text("RECENT PRs").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-                    let records = store.personalRecords()
-                    if records.isEmpty {
-                        Text("Finish a workout to start tracking PRs").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                    } else {
-                        ForEach(records.prefix(5), id: \.exercise) { pr in
-                            Text("\(pr.exercise): \(WeightUnit.roundedLb(fromKg: pr.weightKg)) lb × \(pr.reps)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 6)
-                                .overlay(Rectangle().fill(ForgeColors.cardBorder).frame(height: 1), alignment: .bottom)
-                        }
+                    // Feature request — "get rid of recent PR's section and replace it with lift
+                    // progressions." Promoted out of the collapsed disclosure below (where it
+                    // used to live alongside the calendar) into the main, always-visible flow —
+                    // this is now the primary lift-tracking view, not a buried extra.
+                    GlassCard {
+                        LiftProgressionView(sessions: store.trailingSessions)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    // Feature request — calendar of training days + a StrongLifts-style per-lift
-                    // progression chart. Collapsed by default: this is denser, less-glanceable data
-                    // than the rest of the tab, so it stays out of the way until asked for.
-                    DisclosureGroup("Training History", isExpanded: $trainingHistoryExpanded) {
-                        VStack(alignment: .leading, spacing: 18) {
-                            WorkoutCalendarView(sessionDates: store.trailingSessions.map(\.date))
-                            LiftProgressionView(sessions: store.trailingSessions)
-                        }
-                        .padding(.top, 12)
+                    // Feature request — calendar of training days. Collapsed by default: denser,
+                    // less-glanceable data than the rest of the tab, so it stays out of the way
+                    // until asked for.
+                    DisclosureGroup("Workout Calendar", isExpanded: $trainingHistoryExpanded) {
+                        WorkoutCalendarView(sessionDates: store.trailingSessions.map(\.date))
+                            .padding(.top, 12)
                     }
                     .font(ForgeType.label)
                     .foregroundStyle(ForgeColors.inkMuted)

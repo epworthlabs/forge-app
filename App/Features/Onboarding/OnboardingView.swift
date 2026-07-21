@@ -8,7 +8,7 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            ForgeColors.backgroundBase.ignoresSafeArea()
+            ForgeColors.backgroundWash
             VStack(alignment: .leading, spacing: 18) {
                 StepDots(current: model.step, total: 5)
                 Text("Step \(model.step) of 5")
@@ -192,6 +192,7 @@ private struct HeightPicker: View {
 
 /// Scrollable wheel, not a stepper — every value is directly reachable, nothing is skipped over.
 private struct WeightPicker: View {
+    var title: String = "Body weight"
     @Binding var weightLb: Double
     @State private var unit: OnboardingMassUnit = .lb
 
@@ -205,7 +206,7 @@ private struct WeightPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Body weight").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                Text(title).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                 Spacer()
                 Picker("Unit", selection: $unit) {
                     ForEach(OnboardingMassUnit.allCases, id: \.self) { Text($0.rawValue).tag($0) }
@@ -262,15 +263,45 @@ private struct BodyActivityStep: View {
 private struct GoalStep: View {
     @ObservedObject var model: OnboardingViewModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("What's your goal?").font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
-            ForEach([Goal.cut, .bulk, .recomp, .maintain], id: \.self) { g in
-                OptionCard(label: g.displayLabel, selected: model.goal == g) { model.goal = g }
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("What's your goal?").font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
+                ForEach([Goal.cut, .bulk, .recomp, .maintain], id: \.self) { g in
+                    OptionCard(label: g.displayLabel, selected: model.goal == g) { model.goal = g }
+                }
+
+                // Feature request — "add in a section asking them about their target weight and
+                // time period... use those to calculate their daily caloric intake." Only shown
+                // for cut/bulk — maintain/recomp don't have a literal weight target, so they keep
+                // the existing fixed 0% adjustment untouched.
+                if model.goal == .cut || model.goal == .bulk {
+                    WeightPicker(title: "Target weight", weightLb: Binding(
+                        get: { model.targetWeightLb ?? model.weightLb },
+                        set: { model.targetWeightLb = $0 }
+                    ))
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Time period").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        Picker("Weeks", selection: $model.targetWeeks) {
+                            ForEach(1...104, id: \.self) { w in Text("\(w) weeks").tag(w) }
+                        }
+                        .pickerStyle(.wheel)
+                        .frame(height: 110)
+                    }
+                    .padding(16)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                    Text("This sets your daily calorie target — it won't change unless you update your goal or target here again.")
+                        .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                }
+
+                ContinueButton(title: "Continue", enabled: model.canContinueFromGoal) {
+                    model.step = 4
+                }
+                .padding(.top, 4)
             }
-            Spacer()
-            ContinueButton(title: "Continue", enabled: model.canContinueFromGoal) {
-                model.step = 4
-            }
+            .padding(.bottom, 12)
         }
     }
 }
@@ -366,12 +397,7 @@ private struct ProgramSelectStep: View {
                         .buttonStyle(.plain)
                     }
 
-                    Button { buildingCustomProgram = true } label: {
-                        Text("+ Build custom program").font(ForgeType.body).frame(maxWidth: .infinity)
-                            .padding(16).foregroundStyle(ForgeColors.inkMuted)
-                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(ForgeColors.cardBorder, style: StrokeStyle(dash: [5, 4])))
-                    }
-                    .buttonStyle(.plain)
+                    DashedActionButton(title: "+ Build custom program") { buildingCustomProgram = true }
                 }
             }
             .sheet(isPresented: $buildingCustomProgram) {

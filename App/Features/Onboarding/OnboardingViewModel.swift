@@ -99,6 +99,12 @@ final class OnboardingViewModel: ObservableObject {
     @Published var sex: Sex?
     @Published var activityLevel: ActivityLevel?
     @Published var goal: Goal?
+    // Feature request — "target weight and time period... use those to calculate their daily
+    // caloric intake." Only meaningful for cut/bulk (maintain/recomp don't have a literal weight
+    // target); nil until the user actually opens the target-weight wheel, so it defaults to
+    // whatever `weightLb` was at that point rather than some arbitrary unrelated number.
+    @Published var targetWeightLb: Double?
+    @Published var targetWeeks: Int = 12
     @Published var trainingDaysPerWeek: Int?
     @Published var selectedProgram: ProgramTemplate?
 
@@ -111,7 +117,10 @@ final class OnboardingViewModel: ObservableObject {
     func buildProfile() -> UserProfile? {
         guard let goal, let activityLevel, let sex else { return nil }
         let weightKg = weightLb * 0.45359237
+        let hasWeightTarget = goal == .cut || goal == .bulk
+        let targetWeightKg = hasWeightTarget ? (targetWeightLb ?? weightLb) * 0.45359237 : nil
         return UserProfile(weightKg: weightKg, heightCm: heightCm, age: age, sex: sex,
-                            activityLevel: activityLevel, goal: goal)
+                            activityLevel: activityLevel, goal: goal,
+                            targetWeightKg: targetWeightKg, targetWeeks: hasWeightTarget ? targetWeeks : nil)
     }
 }
