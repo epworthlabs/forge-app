@@ -1,19 +1,46 @@
 import SwiftUI
 import ForgeCore
 
-/// FRG-104 — lets a user build a program from scratch: name it, add days, and for each day add
-/// exercises (searched from the full 873-exercise library) with sets/reps/weight. The result is a
-/// plain `ProgramTemplate` — indistinguishable from a curated one past this screen, since that's
-/// exactly what makes `AppStore.buildExerciseSlots` work for both without special-casing.
-struct CustomProgramBuilderView: View {
+/// FRG-104 (create) / Feature request (edit) — one editor for both: building a brand-new custom
+/// program at onboarding, and editing an existing program's timeframe/weeks from Train. Working
+/// state materializes every week 1...weekCount into `weeks` (seeding an unset week from whatever
+/// it currently resolves to) so editing and "copy to future weeks" can work uniformly; on save,
+/// week 1 becomes `defaultDays` and any other week identical to it is dropped rather than stored
+/// as a redundant override, keeping `ProgramTemplate.weekOverrides` sparse.
+struct ProgramEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    var existingProgram: ProgramTemplate?
     var onSave: (ProgramTemplate) -> Void
 
-    @State private var programName = "My Program"
-    @State private var days: [ProgramDay] = [ProgramDay(name: "Day 1", exercises: [])]
+    @State private var programName: String
+    @State private var weekCount: Int
+    @State private var weeks: [Int: [ProgramDay]]
+    @State private var selectedWeek: Int = 1
     @State private var pickingExerciseForDayID: String?
+    @State private var copyConfirmationShown = false
 
-    private var canSave: Bool { days.contains { !$0.exercises.isEmpty } }
+    init(existingProgram: ProgramTemplate? = nil, onSave: @escaping (ProgramTemplate) -> Void) {
+        self.existingProgram = existingProgram
+        self.onSave = onSave
+        _programName = State(initialValue: existingProgram?.name ?? "My Program")
+        _weekCount = State(initialValue: existingProgram?.weekCount ?? 8)
+        if let existingProgram {
+            var seeded: [Int: [ProgramDay]] = [:]
+            for week in 1...max(1, existingProgram.weekCount) {
+                seeded[week] = existingProgram.days(forWeek: week)
+            }
+            _weeks = State(initialValue: seeded)
+        } else {
+            _weeks = State(initialValue: [1: [ProgramDay(name: "Day 1", exercises: [])]])
+        }
+    }
+
+    private var currentDaysBinding: Binding<[ProgramDay]> {
+        Binding(
+            get: { weeks[selectedWeek] ?? weeks[1] ?? [] },
+            set: { weeks[selectedWeek] = $0 }
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -27,16 +54,75 @@ struct CustomProgramBuilderView: View {
                             .background(.ultraThinMaterial)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                        ForEach($days) { $day in
+                        // Feature request — "editable timeframe."
+                        HStack {
+                            Text("Timeframe").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            Spacer()
+                            Stepper("\(weekCount) weeks", value: Binding(
+                                get: { weekCount },
+                                set: { newCount in
+                                    let clamped = max(1, newCount)
+                                    if clamped > weekCount {
+                                        for week in (weekCount + 1)...clamped { weeks[week] = weeks[1] ?? [] }
+                                    } else {
+                                        for week in (clamped + 1)...weekCount where week <= weekCount { weeks[week] = nil }
+                                    }
+                                    weekCount = clamped
+                                    if selectedWeek > clamped { selectedWeek = clamped }
+                                }
+                            ), in: 1...52)
+                            .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                        }
+                        .padding(12)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        // Week picker.
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(1...weekCount, id: \.self) { week in
+                                    Button { selectedWeek = week } label: {
+                                        Text("Week \(week)")
+                                            .font(ForgeType.caption).fontWeight(week == selectedWeek ? .bold : .regular)
+                                            .foregroundStyle(week == selectedWeek ? Color.white : ForgeColors.ink)
+                                            .padding(.horizontal, 14).padding(.vertical, 8)
+                                            .background(week == selectedWeek ? ForgeColors.accent : ForgeColors.tileBackground)
+                                            .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        if weekCount > selectedWeek {
+                            Button {
+                                copyConfirmationShown = true
+                            } label: {
+                                Text("Copy Week \(selectedWeek) to all future weeks").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                            }
+                            .buttonStyle(.plain)
+                            .confirmationDialog(
+                                "Copy Week \(selectedWeek)'s exercises to weeks \(selectedWeek + 1)–\(weekCount)? This replaces their current content.",
+                                isPresented: $copyConfirmationShown, titleVisibility: .visible
+                            ) {
+                                Button("Copy") {
+                                    let source = currentDaysBinding.wrappedValue
+                                    for week in (selectedWeek + 1)...weekCount { weeks[week] = source }
+                                }
+                                Button("Cancel", role: .cancel) {}
+                            }
+                        }
+
+                        ForEach(currentDaysBinding) { $day in
                             DayEditor(
                                 day: $day,
                                 onAddExercise: { pickingExerciseForDayID = day.id },
-                                onDeleteDay: days.count > 1 ? { days.removeAll { $0.id == day.id } } : nil
+                                onDeleteDay: currentDaysBinding.wrappedValue.count > 1 ? { currentDaysBinding.wrappedValue.removeAll { $0.id == day.id } } : nil
                             )
                         }
 
                         Button {
-                            days.append(ProgramDay(name: "Day \(days.count + 1)", exercises: []))
+                            currentDaysBinding.wrappedValue.append(ProgramDay(name: "Day \(currentDaysBinding.wrappedValue.count + 1)", exercises: []))
                         } label: {
                             Text("+ Add Day").font(ForgeType.body).frame(maxWidth: .infinity)
                                 .padding(12).foregroundStyle(ForgeColors.inkMuted)
@@ -45,11 +131,7 @@ struct CustomProgramBuilderView: View {
                         .buttonStyle(.plain)
 
                         Button {
-                            let program = ProgramTemplate(
-                                id: UUID().uuidString, name: programName, weeks: 8,
-                                days: days.filter { !$0.exercises.isEmpty }
-                            )
-                            onSave(program)
+                            onSave(collapsedProgram())
                             dismiss()
                         } label: {
                             Text("Save Program").font(ForgeType.title).frame(maxWidth: .infinity)
@@ -63,22 +145,42 @@ struct CustomProgramBuilderView: View {
                     .padding(20)
                 }
             }
-            .navigationTitle("Build Program")
+            .navigationTitle(existingProgram == nil ? "Build Program" : "Edit Program")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
             .sheet(isPresented: Binding(get: { pickingExerciseForDayID != nil }, set: { if !$0 { pickingExerciseForDayID = nil } })) {
                 ExercisePickerSheet { exercise in
-                    guard let dayID = pickingExerciseForDayID, let idx = days.firstIndex(where: { $0.id == dayID }) else { return }
-                    days[idx].exercises.append(ProgramExercise(exerciseName: exercise.name, targetSets: 3, targetReps: 8, targetWeightKg: 20))
+                    guard let dayID = pickingExerciseForDayID,
+                          let idx = currentDaysBinding.wrappedValue.firstIndex(where: { $0.id == dayID }) else { return }
+                    currentDaysBinding.wrappedValue[idx].exercises.append(ProgramExercise(exerciseName: exercise.name, targetSets: 3, targetReps: 8, targetWeightKg: 20))
                 }
             }
         }
     }
+
+    private var canSave: Bool { (weeks[1] ?? []).contains { !$0.exercises.isEmpty } }
+
+    private func collapsedProgram() -> ProgramTemplate {
+        let defaultDays = weeks[1] ?? []
+        var overrides: [Int: [ProgramDay]] = [:]
+        if weekCount >= 2 {
+            for week in 2...weekCount {
+                if let content = weeks[week], content != defaultDays {
+                    overrides[week] = content
+                }
+            }
+        }
+        return ProgramTemplate(
+            id: existingProgram?.id ?? UUID().uuidString, name: programName, weekCount: weekCount,
+            defaultDays: defaultDays.filter { !$0.exercises.isEmpty }, weekOverrides: overrides,
+            deloadEveryNWeeks: existingProgram?.deloadEveryNWeeks
+        )
+    }
 }
 
-private struct DayEditor: View {
+struct DayEditor: View {
     @Binding var day: ProgramDay
     var onAddExercise: () -> Void
     var onDeleteDay: (() -> Void)?
@@ -149,7 +251,8 @@ private struct ExerciseRowEditor: View {
     }
 }
 
-private struct ExercisePickerSheet: View {
+/// Reused by Train's swap/add-exercise flow too, not just this editor.
+struct ExercisePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     var onSelect: (Exercise) -> Void
     @State private var query = ""

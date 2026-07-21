@@ -3,15 +3,28 @@ import ForgeCore
 
 struct TrainView: View {
     @EnvironmentObject var store: AppStore
+    @State private var addingExercise = false
+    @State private var editingProgram = false
 
     var body: some View {
         ZStack {
             ForgeColors.backgroundBase.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(store.program.name) · \(store.currentProgramDayName)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                        Text("Log Workout").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(store.program.name) · \(store.currentProgramDayName)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                            Text("Log Workout").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                        }
+                        Spacer()
+                        // Feature request — "editable timeframe... customize or copy over to
+                        // future weeks." Durable program edits, distinct from swap/add/remove in
+                        // ExerciseCard below, which only affect today's session.
+                        Button { editingProgram = true } label: {
+                            Text("Edit Program").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 6)
                     }
 
                     // FRG-206 — a scheduled deload week, not a missed one; surfaced so a lighter
@@ -44,6 +57,15 @@ struct TrainView: View {
                         ExerciseCard(slot: slot)
                     }
 
+                    // Feature request — session-only: adds to today's workout, doesn't touch the
+                    // program definition (see AppStore.addExercise doc comment).
+                    Button { addingExercise = true } label: {
+                        Text("+ Add Exercise").font(ForgeType.body).frame(maxWidth: .infinity)
+                            .padding(14).foregroundStyle(ForgeColors.inkMuted)
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(ForgeColors.cardBorder, style: StrokeStyle(dash: [5, 4])))
+                    }
+                    .buttonStyle(.plain)
+
                     Button {
                         store.finishWorkout()
                     } label: {
@@ -58,6 +80,16 @@ struct TrainView: View {
                 .padding(.bottom, 40)
             }
         }
+        .sheet(isPresented: $addingExercise) {
+            ExercisePickerSheet { exercise in
+                store.addExercise(exercise)
+            }
+        }
+        .sheet(isPresented: $editingProgram) {
+            ProgramEditorView(existingProgram: store.program) { updatedProgram in
+                store.updateProgram(updatedProgram)
+            }
+        }
     }
 
     private var restLabel: String {
@@ -70,13 +102,27 @@ private struct ExerciseCard: View {
     @EnvironmentObject var store: AppStore
     let slot: ExerciseSlot
     @State private var suggestionDismissed = false
+    @State private var editingSets = false
+    @State private var swappingExercise = false
 
     var body: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                Text(slot.exercise.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                Text("\(slot.targetSets)×\(slot.targetReps) @ \(Int(slot.targetWeightKg)) kg")
-                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(slot.exercise.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                        Text("\(slot.targetSets)×\(slot.targetReps) @ \(Int(slot.targetWeightKg)) kg")
+                            .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    }
+                    Spacer()
+                    Menu {
+                        Button("Swap Exercise") { swappingExercise = true }
+                        Button(editingSets ? "Done Editing" : "Edit Sets") { editingSets.toggle() }
+                        Button("Remove Exercise", role: .destructive) { store.removeExercise(exerciseID: slot.id) }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").foregroundStyle(ForgeColors.inkMuted).font(.body)
+                    }
+                }
 
                 // FRG-112 — reference from training history; nil until this exercise has been
                 // logged at least once before.
@@ -96,7 +142,11 @@ private struct ExerciseCard: View {
                 }
 
                 ForEach(slot.sets) { set in
-                    SetRow(exerciseID: slot.id, set: set)
+                    if editingSets {
+                        EditableSetRow(exerciseID: slot.id, set: set, canRemove: slot.sets.count > 1)
+                    } else {
+                        SetRow(exerciseID: slot.id, set: set)
+                    }
                 }
 
                 Button {
@@ -109,6 +159,11 @@ private struct ExerciseCard: View {
                 .buttonStyle(.plain)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .sheet(isPresented: $swappingExercise) {
+            ExercisePickerSheet { exercise in
+                store.swapExercise(exerciseID: slot.id, with: exercise)
+            }
         }
     }
 }
@@ -179,6 +234,41 @@ private struct SetRow: View {
                 .padding(.leading, 26)
             }
         }
+    }
+}
+
+/// Feature request — swaps the normal tap-to-complete row for direct weight/reps editing plus a
+/// remove button, while "Edit Sets" is toggled on for this exercise.
+private struct EditableSetRow: View {
+    @EnvironmentObject var store: AppStore
+    let exerciseID: ExerciseSlot.ID
+    let set: LoggedSet
+    let canRemove: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Stepper(value: Binding(
+                get: { set.weightKg },
+                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: $0, reps: set.reps) }
+            ), in: 0...500, step: 2.5) {
+                Text("\(Int(set.weightKg)) kg").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+            }
+            Stepper(value: Binding(
+                get: { set.reps },
+                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
+            ), in: 1...50) {
+                Text("\(set.reps) reps").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+            }
+            if canRemove {
+                Button { store.removeSet(exerciseID: exerciseID, setID: set.id) } label: {
+                    Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(9)
+        .background(ForgeColors.tileBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

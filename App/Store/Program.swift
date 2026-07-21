@@ -15,19 +15,31 @@ struct ProgramDay: Identifiable, Codable, Hashable {
 }
 
 /// FRG-104 — previously carried no exercise content at all (just id/name/daysPerWeek/weeks), so
-/// `AppStore` hardcoded the same 3 exercises regardless of which program was selected. `days` is
-/// what actually drives `todaysExercises` now — for both the 3 curated templates and any
-/// user-built custom program, so the distinction between them is invisible past selection time.
+/// `AppStore` hardcoded the same 3 exercises regardless of which program was selected.
+///
+/// Feature request — "editable timeframe... customize or copy over to future weeks" needed a
+/// second pass on this model: `weekCount` is the editable timeframe, `defaultDays` is what every
+/// week uses unless explicitly customized, and `weekOverrides` holds only the weeks that
+/// genuinely differ (1-indexed). This is deliberately sparse rather than a full `[ProgramWeek]`
+/// array — the common case (a program that repeats the same split every week) shouldn't have to
+/// store N duplicate copies of the same day list, and "copy week 3 to future weeks" is just
+/// writing entries into this dictionary.
 struct ProgramTemplate: Identifiable, Hashable, Codable {
     var id: String
     var name: String
-    var weeks: Int
-    var days: [ProgramDay]
-    // FRG-206 — nil means no scheduled deloads (the default for custom programs, which don't
-    // expose this in the builder UI yet). 5/3/1's classic structure has a deload every 4th week
-    // built in, so the curated template sets this explicitly.
+    var weekCount: Int
+    var defaultDays: [ProgramDay]
+    var weekOverrides: [Int: [ProgramDay]] = [:]
+    // FRG-206 — nil means no scheduled deloads (the default; not exposed in the editor UI yet).
     var deloadEveryNWeeks: Int? = nil
 
-    var daysPerWeek: Int { days.count }
-    var meta: String { "\(daysPerWeek) days/wk · \(weeks) weeks" }
+    /// 1-indexed week number. Out-of-range weeks (program ran longer than its own timeframe)
+    /// clamp to the last defined week rather than crash or return empty.
+    func days(forWeek week: Int) -> [ProgramDay] {
+        let clamped = max(1, min(week, weekCount))
+        return weekOverrides[clamped] ?? defaultDays
+    }
+
+    var daysPerWeek: Int { defaultDays.count }
+    var meta: String { "\(daysPerWeek) days/wk · \(weekCount) weeks" }
 }

@@ -28,7 +28,7 @@ final class OnboardingViewModel: ObservableObject {
     // dataset (873 exercises) — not guessed, since a typo here would silently produce an empty
     // ExerciseSlot (ExerciseLibrary.search returning no match).
     static let templates: [ProgramTemplate] = [
-        ProgramTemplate(id: "ppl", name: "Push/Pull/Legs — Strength", weeks: 12, days: [
+        ProgramTemplate(id: "ppl", name: "Push/Pull/Legs — Strength", weekCount: 12, defaultDays: [
             ProgramDay(name: "Push", exercises: [
                 ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 4, targetReps: 6, targetWeightKg: 60),
                 ProgramExercise(exerciseName: "Standing Military Press", targetSets: 3, targetReps: 8, targetWeightKg: 40),
@@ -45,13 +45,13 @@ final class OnboardingViewModel: ObservableObject {
                 ProgramExercise(exerciseName: "Leg Press", targetSets: 3, targetReps: 12, targetWeightKg: 140),
             ]),
         ]),
-        ProgramTemplate(id: "531", name: "5/3/1 for Beginners", weeks: 16, days: [
+        ProgramTemplate(id: "531", name: "5/3/1 for Beginners", weekCount: 16, defaultDays: [
             ProgramDay(name: "Squat Day", exercises: [ProgramExercise(exerciseName: "Barbell Squat", targetSets: 5, targetReps: 5, targetWeightKg: 80)]),
             ProgramDay(name: "Bench Day", exercises: [ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 5, targetReps: 5, targetWeightKg: 60)]),
             ProgramDay(name: "Deadlift Day", exercises: [ProgramExercise(exerciseName: "Barbell Deadlift", targetSets: 5, targetReps: 5, targetWeightKg: 100)]),
             ProgramDay(name: "Press Day", exercises: [ProgramExercise(exerciseName: "Standing Military Press", targetSets: 5, targetReps: 5, targetWeightKg: 40)]),
         ], deloadEveryNWeeks: 4), // 5/3/1's classic structure: 3 weeks building intensity, 4th week deload
-        ProgramTemplate(id: "ul", name: "Upper/Lower Hypertrophy", weeks: 10, days: [
+        ProgramTemplate(id: "ul", name: "Upper/Lower Hypertrophy", weekCount: 10, defaultDays: [
             ProgramDay(name: "Upper A", exercises: [
                 ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 4, targetReps: 10, targetWeightKg: 55),
                 ProgramExercise(exerciseName: "Bent Over Barbell Row", targetSets: 4, targetReps: 10, targetWeightKg: 55),

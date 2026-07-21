@@ -11,6 +11,7 @@ struct FoodSearchView: View {
     @State private var isSearching = false
     @State private var scannerPresented = false
     @State private var notFoundBarcode: String?
+    @State private var confirmingFood: FoodSearchResult?
 
     var body: some View {
         NavigationStack {
@@ -46,8 +47,7 @@ struct FoodSearchView: View {
                                 HStack(spacing: 6) {
                                     ForEach(store.recentFoods) { food in
                                         Button {
-                                            store.logFood(food, to: meal)
-                                            dismiss()
+                                            confirmingFood = food
                                         } label: {
                                             Text(food.name).font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
                                                 .padding(.horizontal, 12).padding(.vertical, 7)
@@ -70,8 +70,7 @@ struct FoodSearchView: View {
 
                         ForEach(results) { food in
                             Button {
-                                store.logFood(food, to: meal)
-                                dismiss()
+                                confirmingFood = food
                             } label: {
                                 HStack(spacing: 10) {
                                     RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ForgeColors.tileBackground).frame(width: 32, height: 32)
@@ -120,13 +119,114 @@ struct FoodSearchView: View {
             BarcodeScannerView { code in
                 Task {
                     if let match = await store.lookupBarcode(code) {
-                        store.logFood(match, to: meal)
-                        dismiss()
+                        confirmingFood = match
                     } else {
                         notFoundBarcode = code
                     }
                 }
             }
         }
+        .sheet(item: $confirmingFood) { food in
+            PortionConfirmSheet(food: food, meal: meal) { scaledFood in
+                store.logFood(scaledFood, to: meal)
+                dismiss()
+            }
+        }
+    }
+}
+
+private struct PortionConfirmSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let food: FoodSearchResult
+    let meal: Meal
+    var onConfirm: (FoodSearchResult) -> Void
+
+    @State private var multiplier: Double = 1.0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Capsule().fill(ForgeColors.cardBorder).frame(width: 36, height: 4).frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(food.name).font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+                if let brand = food.brand {
+                    Text(brand).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                }
+            }
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Portion").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                    Text(food.servingDescription).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                }
+                Spacer()
+                Button { multiplier = max(0.25, multiplier - 0.25) } label: {
+                    Image(systemName: "minus").font(.system(size: 14, weight: .bold))
+                        .frame(width: 34, height: 34).foregroundStyle(ForgeColors.ink)
+                        .background(ForgeColors.tileBackground).clipShape(Circle())
+                }
+                Text("\(trimmedDecimal(multiplier))×").font(ForgeType.title).foregroundStyle(ForgeColors.ink).frame(width: 54)
+                Button { multiplier += 0.25 } label: {
+                    Image(systemName: "plus").font(.system(size: 14, weight: .bold))
+                        .frame(width: 34, height: 34).foregroundStyle(ForgeColors.ink)
+                        .background(ForgeColors.tileBackground).clipShape(Circle())
+                }
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 10) {
+                PortionMacroTile(label: "kcal", value: "\(scaledKcal)")
+                PortionMacroTile(label: "Protein", value: "\(Int(scaledProtein))g")
+                PortionMacroTile(label: "Carbs", value: "\(Int(scaledCarb))g")
+                PortionMacroTile(label: "Fat", value: "\(Int(scaledFat))g")
+            }
+
+            Button {
+                onConfirm(scaled(food, by: multiplier))
+            } label: {
+                Text("Add to \(meal.rawValue)").font(ForgeType.title).frame(maxWidth: .infinity)
+                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(22)
+        .presentationDetents([.height(360)])
+    }
+
+    private var scaledKcal: Int { Int((Double(food.kcal) * multiplier).rounded()) }
+    private var scaledProtein: Double { food.proteinG * multiplier }
+    private var scaledCarb: Double { food.carbG * multiplier }
+    private var scaledFat: Double { food.fatG * multiplier }
+
+    private func scaled(_ food: FoodSearchResult, by multiplier: Double) -> FoodSearchResult {
+        FoodSearchResult(
+            id: food.id, name: food.name, brand: food.brand,
+            kcal: scaledKcal, proteinG: scaledProtein, carbG: scaledCarb, fatG: scaledFat,
+            servingDescription: multiplier == 1.0 ? food.servingDescription : "\(trimmedDecimal(multiplier))× \(food.servingDescription)",
+            source: food.source, barcodeUPC: food.barcodeUPC
+        )
+    }
+
+    private func trimmedDecimal(_ value: Double) -> String {
+        var text = String(format: "%.2f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text
+    }
+}
+
+private struct PortionMacroTile: View {
+    let label: String
+    let value: String
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+            Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(ForgeColors.tileBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

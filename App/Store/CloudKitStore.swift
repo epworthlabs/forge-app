@@ -34,15 +34,12 @@ actor CloudKitStore {
         record["activityLevel"] = profile.activityLevel.rawValue
         record["goal"] = profile.goal.rawValue
         record["fatFreeMassKg"] = profile.fatFreeMassKg
-        record["programID"] = program.id
-        record["programName"] = program.name
-        // FRG-104 — days carries the actual exercise content (curated or user-built); JSON-encoded
-        // into one field rather than a child-record hierarchy, since a program's full day/exercise
-        // list is small and always read/written as a whole, never queried piecemeal.
-        record["programDaysJSON"] = try JSONEncoder().encode(program.days)
-        record["programWeeks"] = program.weeks
+        // Feature request — ProgramTemplate grew a sparse per-week override dictionary (for
+        // "customize or copy to future weeks"), so it's encoded as one JSON blob rather than
+        // exploded into individual fields — simpler and doesn't need a new CKRecord field every
+        // time the program's shape grows. Always read/written as a whole, never queried piecemeal.
+        record["programJSON"] = try JSONEncoder().encode(program)
         record["currentProgramDayIndex"] = dayIndex
-        record["programDeloadEveryNWeeks"] = program.deloadEveryNWeeks
         record["programStartDate"] = programStartDate
         _ = try await database.save(record)
     }
@@ -55,21 +52,12 @@ actor CloudKitStore {
               let sexRaw = record["sex"] as? String, let sex = Sex(rawValue: sexRaw),
               let activityRaw = record["activityLevel"] as? Double, let activityLevel = ActivityLevel(rawValue: activityRaw),
               let goalRaw = record["goal"] as? String, let goal = Goal(rawValue: goalRaw),
-              let programID = record["programID"] as? String,
-              let programName = record["programName"] as? String,
-              let programWeeks = record["programWeeks"] as? Int
+              let programData = record["programJSON"] as? Data,
+              let program = try? JSONDecoder().decode(ProgramTemplate.self, from: programData)
         else { return nil }
 
         let profile = UserProfile(weightKg: weightKg, heightCm: heightCm, age: age, sex: sex, activityLevel: activityLevel,
                                    goal: goal, fatFreeMassKg: record["fatFreeMassKg"] as? Double)
-        let days: [ProgramDay]
-        if let daysData = record["programDaysJSON"] as? Data, let decoded = try? JSONDecoder().decode([ProgramDay].self, from: daysData) {
-            days = decoded
-        } else {
-            days = [] // records saved before FRG-104 won't have this field
-        }
-        let program = ProgramTemplate(id: programID, name: programName, weeks: programWeeks, days: days,
-                                       deloadEveryNWeeks: record["programDeloadEveryNWeeks"] as? Int)
         let dayIndex = record["currentProgramDayIndex"] as? Int ?? 0
         let programStartDate = record["programStartDate"] as? Date ?? Date()
         return (profile, program, dayIndex, programStartDate)

@@ -254,7 +254,7 @@ private struct ProgramSelectStep: View {
                 }
             }
             .sheet(isPresented: $buildingCustomProgram) {
-                CustomProgramBuilderView { program in
+                ProgramEditorView { program in
                     customProgram = program
                     model.selectedProgram = program
                 }

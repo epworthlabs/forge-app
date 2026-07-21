@@ -84,29 +84,34 @@ final class AppStore: ObservableObject {
         self.currentProgramDayIndex = startingDayIndex
         self.programStartDate = programStartDate
         self.bodyweightLogLb = [(Date(), profile.weightKg / 0.45359237)]
-        self.todaysExercises = Self.buildExerciseSlots(for: program, dayIndex: startingDayIndex)
+        let week = Self.week(fromStartDate: programStartDate)
+        self.todaysExercises = Self.buildExerciseSlots(for: program, week: week, dayIndex: startingDayIndex)
         refreshLastPerformance()
     }
 
-    // FRG-206 — 1-indexed; week 1 is the week the program was started in, not the epoch.
-    var currentProgramWeek: Int {
-        let elapsedDays = Calendar.current.dateComponents([.day], from: programStartDate, to: Date()).day ?? 0
+    // FRG-206 — 1-indexed; week 1 is the week the program was started in, not the epoch. A static
+    // helper (not just a computed property) because `init` needs this before `self` is fully set.
+    private static func week(fromStartDate startDate: Date) -> Int {
+        let elapsedDays = Calendar.current.dateComponents([.day], from: startDate, to: Date()).day ?? 0
         return max(1, elapsedDays / 7 + 1)
     }
+    var currentProgramWeek: Int { Self.week(fromStartDate: programStartDate) }
 
     var isDeloadWeek: Bool {
         guard let interval = program.deloadEveryNWeeks, interval > 0 else { return false }
         return currentProgramWeek % interval == 0
     }
 
-    // FRG-104 — the whole point of a "program": turns its day-by-day exercise list into the
-    // actual ExerciseSlots Train/Today read. `exercise.name` matching against the exercise it was
-    // authored against (curated templates) or picked from the library (custom programs) means
-    // this can't silently drop an exercise — ExerciseLibrary.search always has an exact match for
-    // names that came from the library itself.
-    private static func buildExerciseSlots(for program: ProgramTemplate, dayIndex: Int) -> [ExerciseSlot] {
-        guard !program.days.isEmpty else { return [] }
-        let day = program.days[dayIndex % program.days.count]
+    // FRG-104/Feature request — the whole point of a "program": turns its day-by-day exercise
+    // list into the actual ExerciseSlots Train/Today read, resolved against whichever week's
+    // content applies (default, or a per-week override — see ProgramTemplate.days(forWeek:)).
+    // `exercise.name` matching against the exercise it was authored against (curated templates)
+    // or picked from the library (custom programs) means this can't silently drop an exercise —
+    // ExerciseLibrary.search always has an exact match for names that came from the library itself.
+    private static func buildExerciseSlots(for program: ProgramTemplate, week: Int, dayIndex: Int) -> [ExerciseSlot] {
+        let days = program.days(forWeek: week)
+        guard !days.isEmpty else { return [] }
+        let day = days[dayIndex % days.count]
         return day.exercises.compactMap { programExercise -> ExerciseSlot? in
             guard let exercise = ExerciseLibrary.search(programExercise.exerciseName).first(where: { $0.name == programExercise.exerciseName }) else { return nil }
             return ExerciseSlot(
@@ -118,8 +123,21 @@ final class AppStore: ObservableObject {
     }
 
     var currentProgramDayName: String {
-        guard !program.days.isEmpty else { return program.name }
-        return program.days[currentProgramDayIndex % program.days.count].name
+        let days = program.days(forWeek: currentProgramWeek)
+        guard !days.isEmpty else { return program.name }
+        return days[currentProgramDayIndex % days.count].name
+    }
+
+    // Feature request — durable program editing (timeframe, per-week content, copy-to-future-
+    // weeks), distinct from Feature 2's session-only Train edits. Rebuilds today's exercise list
+    // from the updated program immediately, since an in-progress session's plan could have just
+    // changed under it — editing your program is a deliberate, infrequent action, not something
+    // done mid-set, so resetting today's slate here is an acceptable tradeoff for staying correct.
+    func updateProgram(_ newProgram: ProgramTemplate) {
+        program = newProgram
+        todaysExercises = Self.buildExerciseSlots(for: newProgram, week: currentProgramWeek, dayIndex: currentProgramDayIndex)
+        refreshLastPerformance()
+        Task { await SyncQueue.shared.enqueue(.profile(profile: profile, program: newProgram, dayIndex: currentProgramDayIndex, programStartDate: programStartDate)) }
     }
 
     var currentLoadScore: Double {
@@ -218,10 +236,11 @@ final class AppStore: ObservableObject {
         trailingSessions.append(session)
         workoutsCompletedThisWeek += 1
 
-        // FRG-104 — advance to the next day in the program's rotation and rebuild the exercise
-        // list from it, rather than just resetting today's `done` flags in place.
-        currentProgramDayIndex = program.days.isEmpty ? 0 : (currentProgramDayIndex + 1) % program.days.count
-        todaysExercises = Self.buildExerciseSlots(for: program, dayIndex: currentProgramDayIndex)
+        // FRG-104 — advance to the next day in the current week's rotation and rebuild the
+        // exercise list from it, rather than just resetting today's `done` flags in place.
+        let daysThisWeek = program.days(forWeek: currentProgramWeek)
+        currentProgramDayIndex = daysThisWeek.isEmpty ? 0 : (currentProgramDayIndex + 1) % daysThisWeek.count
+        todaysExercises = Self.buildExerciseSlots(for: program, week: currentProgramWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
 
         Task {
@@ -266,6 +285,52 @@ final class AppStore: ObservableObject {
             todaysExercises[exIdx].sets[setIdx].weightKg = suggestion.weightKg
             todaysExercises[exIdx].sets[setIdx].reps = suggestion.reps
         }
+    }
+
+    // Feature request — session-only editing of today's workout: swap/add/remove exercises,
+    // remove sets, edit weight/reps directly. Deliberately doesn't touch `program` at all — this
+    // is a one-off substitution ("gym doesn't have this machine today"), not a change to what the
+    // program calls for on this day going forward. Durable program editing is a separate,
+    // explicit action (program editor), not a side effect of adjusting today's session.
+
+    func removeSet(exerciseID: ExerciseSlot.ID, setID: LoggedSet.ID) {
+        guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }),
+              todaysExercises[exIdx].sets.count > 1 else { return } // never drop to zero sets — remove the exercise instead
+        todaysExercises[exIdx].sets.removeAll { $0.id == setID }
+    }
+
+    func updateSet(exerciseID: ExerciseSlot.ID, setID: LoggedSet.ID, weightKg: Double, reps: Int) {
+        guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }),
+              let setIdx = todaysExercises[exIdx].sets.firstIndex(where: { $0.id == setID }) else { return }
+        todaysExercises[exIdx].sets[setIdx].weightKg = weightKg
+        todaysExercises[exIdx].sets[setIdx].reps = reps
+    }
+
+    func removeExercise(exerciseID: ExerciseSlot.ID) {
+        todaysExercises.removeAll { $0.id == exerciseID }
+    }
+
+    func addExercise(_ exercise: Exercise, targetSets: Int = 3, targetReps: Int = 8) {
+        let seedWeight = mostRecentSet(for: exercise.name)?.weightKg ?? 20
+        let slot = ExerciseSlot(exercise: exercise, targetSets: targetSets, targetReps: targetReps, targetWeightKg: seedWeight,
+                                 lastPerformance: nil, sets: (0..<targetSets).map { _ in LoggedSet(weightKg: seedWeight, reps: targetReps) })
+        todaysExercises.append(slot)
+        refreshLastPerformance()
+    }
+
+    // Keeps target sets/reps (the program's intent for this slot), but re-seeds weight from the
+    // new exercise's own history if any exists — carrying over the old exercise's weight onto an
+    // unrelated lift wouldn't mean anything.
+    func swapExercise(exerciseID: ExerciseSlot.ID, with newExercise: Exercise) {
+        guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }) else { return }
+        let targetSets = todaysExercises[exIdx].targetSets
+        let targetReps = todaysExercises[exIdx].targetReps
+        let seedWeight = mostRecentSet(for: newExercise.name)?.weightKg ?? todaysExercises[exIdx].targetWeightKg
+        todaysExercises[exIdx] = ExerciseSlot(
+            exercise: newExercise, targetSets: targetSets, targetReps: targetReps, targetWeightKg: seedWeight,
+            lastPerformance: nil, sets: (0..<targetSets).map { _ in LoggedSet(weightKg: seedWeight, reps: targetReps) }
+        )
+        refreshLastPerformance()
     }
 
     // FRG-130/131 — backfills history for a returning user; called once after construction
