@@ -22,6 +22,18 @@ extension Goal {
     }
 }
 
+extension Sex {
+    // Labeled "Sex" rather than "Gender" in the UI — this drives the Mifflin-St Jeor BMR offset
+    // term directly (+5 male / -161 female), not a general identity field, and there isn't a
+    // third term in that formula to back a third option honestly.
+    var displayLabel: String {
+        switch self {
+        case .male: return "Male"
+        case .female: return "Female"
+        }
+    }
+}
+
 @MainActor
 final class OnboardingViewModel: ObservableObject {
     // Exercise names below are verified exact matches against the bundled free-exercise-db
@@ -77,22 +89,27 @@ final class OnboardingViewModel: ObservableObject {
 
     @Published var step: Int = 1
     @Published var weightLb: Double = 178
+    // Feature request — these three used to be hardcoded placeholders (178cm/30/male) at the
+    // moment onboarding finished, silently feeding the wrong numbers into every BMR/TDEE
+    // calculation from day one. Now real onboarding inputs (AboutYouStep). `sex` starts nil and
+    // gates continuing, since a wrong guess there is a real error in the calorie math, not a
+    // reasonable default the way an age/height wheel's starting position is.
+    @Published var heightCm: Double = 175
+    @Published var age: Int = 30
+    @Published var sex: Sex?
     @Published var activityLevel: ActivityLevel?
     @Published var goal: Goal?
     @Published var trainingDaysPerWeek: Int?
     @Published var selectedProgram: ProgramTemplate?
 
+    var canContinueFromAboutYou: Bool { sex != nil }
     var canContinueFromGoal: Bool { goal != nil }
     var canEnterApp: Bool { selectedProgram != nil }
 
-    func adjustWeight(by delta: Double) {
-        weightLb = max(90, weightLb + delta)
-    }
-
     /// Onboarding's whole reason for being one flow, not two — this seeds both the program
     /// selection and, via ForgeCore, the baseline nutrition target in a single pass.
-    func buildProfile(heightCm: Double, age: Int, sex: Sex) -> UserProfile? {
-        guard let goal, let activityLevel else { return nil }
+    func buildProfile() -> UserProfile? {
+        guard let goal, let activityLevel, let sex else { return nil }
         let weightKg = weightLb * 0.45359237
         return UserProfile(weightKg: weightKg, heightCm: heightCm, age: age, sex: sex,
                             activityLevel: activityLevel, goal: goal)

@@ -10,17 +10,18 @@ struct OnboardingView: View {
         ZStack {
             ForgeColors.backgroundBase.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 18) {
-                StepDots(current: model.step, total: 4)
-                Text("Step \(model.step) of 4")
+                StepDots(current: model.step, total: 5)
+                Text("Step \(model.step) of 5")
                     .font(ForgeType.label)
                     .foregroundStyle(ForgeColors.accent)
                     .textCase(.uppercase)
 
                 Group {
                     switch model.step {
-                    case 1: BodyActivityStep(model: model)
-                    case 2: GoalStep(model: model)
-                    case 3: TrainingDaysStep(model: model)
+                    case 1: AboutYouStep(model: model)
+                    case 2: BodyActivityStep(model: model)
+                    case 3: GoalStep(model: model)
+                    case 4: TrainingDaysStep(model: model)
                     default: ProgramSelectStep(model: model, onComplete: onComplete)
                     }
                 }
@@ -88,53 +89,173 @@ private struct ContinueButton: View {
     }
 }
 
-private struct BodyActivityStep: View {
+/// Feature request — real onboarding inputs for age/sex/height, used directly by TDEECalculator's
+/// Mifflin-St Jeor formula. These were previously hardcoded (178cm/30/male) at profile-build time,
+/// silently feeding the wrong numbers into every calorie target from day one for anyone who wasn't
+/// a 30-year-old 178cm male.
+private struct AboutYouStep: View {
     @ObservedObject var model: OnboardingViewModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("A few basics").font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Body weight").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                HStack {
-                    StepperButton(symbol: "minus") { model.adjustWeight(by: -5) }
-                    Spacer()
-                    Text("\(Int(model.weightLb)) lb").font(ForgeType.title)
-                    Spacer()
-                    StepperButton(symbol: "plus") { model.adjustWeight(by: 5) }
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("A bit about you").font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
+                    Text("Feeds your baseline calorie math directly.").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                 }
-            }
-            .padding(18)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-            Text("Activity level").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-            ForEach([ActivityLevel.low, .moderate, .high], id: \.self) { level in
-                OptionCard(label: level.displayLabel, selected: model.activityLevel == level) {
-                    model.activityLevel = level
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Age").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    Picker("Age", selection: $model.age) {
+                        ForEach(13...90, id: \.self) { age in Text("\(age)").tag(age) }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(height: 110)
                 }
-            }
+                .padding(16)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
-            Spacer()
-            ContinueButton(title: "Continue", enabled: model.activityLevel != nil) {
-                model.step = 2
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Sex").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    ForEach([Sex.male, .female], id: \.self) { s in
+                        OptionCard(label: s.displayLabel, selected: model.sex == s) { model.sex = s }
+                    }
+                }
+
+                HeightPicker(heightCm: $model.heightCm)
+
+                ContinueButton(title: "Continue", enabled: model.canContinueFromAboutYou) {
+                    model.step = 2
+                }
+                .padding(.top, 4)
             }
+            .padding(.bottom, 12)
         }
     }
 }
 
-private struct StepperButton: View {
-    let symbol: String
-    let action: () -> Void
+private enum OnboardingHeightUnit: String, CaseIterable { case ftIn = "ft/in", cm = "cm" }
+private enum OnboardingMassUnit: String, CaseIterable { case lb, kg }
+
+/// Scrollable wheel, not a stepper — every value is directly reachable, nothing is skipped over.
+private struct HeightPicker: View {
+    @Binding var heightCm: Double
+    @State private var unit: OnboardingHeightUnit = .ftIn
+
+    private var totalInches: Int { Int((heightCm / 2.54).rounded()) }
+    private var feetBinding: Binding<Int> {
+        Binding(get: { totalInches / 12 }, set: { heightCm = Double($0 * 12 + totalInches % 12) * 2.54 })
+    }
+    private var inchesBinding: Binding<Int> {
+        Binding(get: { totalInches % 12 }, set: { heightCm = Double((totalInches / 12) * 12 + $0) * 2.54 })
+    }
+    private var cmBinding: Binding<Int> {
+        Binding(get: { Int(heightCm.rounded()) }, set: { heightCm = Double($0) })
+    }
+
     var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .bold))
-                .frame(width: 38, height: 38)
-                .background(ForgeColors.tileBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Height").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                Spacer()
+                Picker("Unit", selection: $unit) {
+                    ForEach(OnboardingHeightUnit.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 130)
+            }
+            if unit == .ftIn {
+                HStack(spacing: 0) {
+                    Picker("Feet", selection: feetBinding) {
+                        ForEach(3...7, id: \.self) { ft in Text("\(ft) ft").tag(ft) }
+                    }
+                    .pickerStyle(.wheel)
+                    Picker("Inches", selection: inchesBinding) {
+                        ForEach(0...11, id: \.self) { inch in Text("\(inch) in").tag(inch) }
+                    }
+                    .pickerStyle(.wheel)
+                }
+                .frame(height: 110)
+            } else {
+                Picker("Height (cm)", selection: cmBinding) {
+                    ForEach(120...220, id: \.self) { cm in Text("\(cm) cm").tag(cm) }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 110)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(16)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+/// Scrollable wheel, not a stepper — every value is directly reachable, nothing is skipped over.
+private struct WeightPicker: View {
+    @Binding var weightLb: Double
+    @State private var unit: OnboardingMassUnit = .lb
+
+    private var lbBinding: Binding<Int> {
+        Binding(get: { Int(weightLb.rounded()) }, set: { weightLb = Double($0) })
+    }
+    private var kgBinding: Binding<Int> {
+        Binding(get: { Int((weightLb * 0.45359237).rounded()) }, set: { weightLb = Double($0) / 0.45359237 })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Body weight").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                Spacer()
+                Picker("Unit", selection: $unit) {
+                    ForEach(OnboardingMassUnit.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 100)
+            }
+            if unit == .lb {
+                Picker("Weight (lb)", selection: lbBinding) {
+                    ForEach(70...400, id: \.self) { lb in Text("\(lb) lb").tag(lb) }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 110)
+            } else {
+                Picker("Weight (kg)", selection: kgBinding) {
+                    ForEach(30...180, id: \.self) { kg in Text("\(kg) kg").tag(kg) }
+                }
+                .pickerStyle(.wheel)
+                .frame(height: 110)
+            }
+        }
+        .padding(16)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct BodyActivityStep: View {
+    @ObservedObject var model: OnboardingViewModel
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Weight & activity").font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
+
+                WeightPicker(weightLb: $model.weightLb)
+
+                Text("Activity level").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                ForEach([ActivityLevel.low, .moderate, .high], id: \.self) { level in
+                    OptionCard(label: level.displayLabel, selected: model.activityLevel == level) {
+                        model.activityLevel = level
+                    }
+                }
+
+                ContinueButton(title: "Continue", enabled: model.activityLevel != nil) {
+                    model.step = 3
+                }
+                .padding(.top, 4)
+            }
+            .padding(.bottom, 12)
+        }
     }
 }
 
@@ -148,7 +269,7 @@ private struct GoalStep: View {
             }
             Spacer()
             ContinueButton(title: "Continue", enabled: model.canContinueFromGoal) {
-                model.step = 3
+                model.step = 4
             }
         }
     }
@@ -181,7 +302,7 @@ private struct TrainingDaysStep: View {
             }
             Spacer()
             ContinueButton(title: "Continue", enabled: model.trainingDaysPerWeek != nil) {
-                model.step = 4
+                model.step = 5
             }
         }
     }
@@ -261,8 +382,7 @@ private struct ProgramSelectStep: View {
             }
 
             ContinueButton(title: "Enter App", enabled: model.canEnterApp) {
-                // Height/age/sex placeholders here until a body-details step exists — tracked in FRG-101.
-                guard let profile = model.buildProfile(heightCm: 178, age: 30, sex: .male),
+                guard let profile = model.buildProfile(),
                       let program = model.selectedProgram else { return }
                 // Goal 05 (PRD): per-feature engagement signal for the free-first paywall decision.
                 PostHogSDK.shared.capture("onboarding_completed", properties: [
