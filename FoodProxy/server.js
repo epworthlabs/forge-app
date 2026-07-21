@@ -49,6 +49,19 @@ const app = express();
 
 app.get("/health", (req, res) => res.status(200).send("ok"));
 
+// Temporary diagnostic — reports this host's actual current outbound IP, to verify it really
+// falls inside whatever range is allowlisted in FatSecret's dashboard rather than assuming
+// Render's published range is accurate/current. Remove once the FatSecret auth issue is resolved.
+app.get("/whereami", async (req, res) => {
+  try {
+    const ipResponse = await fetch("https://api.ipify.org?format=json");
+    const data = await ipResponse.json();
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
+});
+
 app.get("/search", async (req, res) => {
   if (req.header("X-App-Secret") !== APP_SHARED_SECRET) {
     return res.status(401).json({ error: "unauthorized" });
