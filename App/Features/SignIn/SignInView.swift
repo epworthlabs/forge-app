@@ -14,10 +14,10 @@ struct SignInView: View {
             ForgeColors.backgroundWash
             VStack(spacing: 24) {
                 Spacer()
-                Image(systemName: "figure.strengthtraining.traditional")
-                    .font(.system(size: 56)).foregroundStyle(ForgeColors.accent)
-                VStack(spacing: 8) {
-                    Text("Trakt").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                TraktMark(size: 88, tileCornerRadius: 24)
+                    .shadow(color: ForgeColors.cardShadow, radius: 16, x: 0, y: 8)
+                VStack(spacing: 10) {
+                    TraktWordmark(size: 28)
                     Text("Sign in to get started").font(ForgeType.body).foregroundStyle(ForgeColors.inkMuted)
                 }
                 Spacer()

@@ -10,6 +10,13 @@ struct OnboardingView: View {
         ZStack {
             ForgeColors.backgroundWash
             VStack(alignment: .leading, spacing: 18) {
+                // Feature request — "include the logo in the app where you see fit."
+                HStack(spacing: 8) {
+                    TraktMark(size: 26, tileCornerRadius: 8)
+                    TraktWordmark(size: 15)
+                }
+                .padding(.bottom, 4)
+
                 StepDots(current: model.step, total: 4)
                 Text("Step \(model.step) of 4")
                     .font(ForgeType.label)
