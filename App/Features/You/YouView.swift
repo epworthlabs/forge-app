@@ -8,6 +8,7 @@ struct YouView: View {
     @AppStorage("healthSyncEnabled") private var healthSyncEnabled = false
     @State private var showingMethodology = false
     @State private var editingGoalTarget = false
+    @State private var showingSignOutConfirmation = false
 
     var body: some View {
         ZStack {
@@ -105,6 +106,16 @@ struct YouView: View {
                         }
                     }
 
+                    // Feature request — the sign-in gate needs a way back out of it, both for
+                    // switching Apple IDs and for actually testing the sign-in screen again.
+                    GlassCard {
+                        Button { showingSignOutConfirmation = true } label: {
+                            Text("Sign Out").font(ForgeType.body).foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     // FRG-122/FRG-121 — attribution both food-database sources require as a
                     // condition of free-tier use, not decorative: FatSecret's terms require a
                     // "Powered by FatSecret" credit, and Open Food Facts data is ODbL-licensed
@@ -120,6 +131,10 @@ struct YouView: View {
         .preferredColorScheme(forceDarkMode ? .dark : nil)
         .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
         .sheet(isPresented: $editingGoalTarget) { GoalTargetEditSheet() }
+        .confirmationDialog("Sign out of Forge?", isPresented: $showingSignOutConfirmation, titleVisibility: .visible) {
+            Button("Sign Out", role: .destructive) { AppleSignInManager.shared.signOut() }
+            Button("Cancel", role: .cancel) {}
+        }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than
             // only right after the toggle flips.

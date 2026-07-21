@@ -41,3 +41,4 @@ targets:
         com.apple.developer.icloud-container-identifiers: ["iCloud.com.epworthlabs.forge"]
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
+        com.apple.developer.applesignin: ["Default"]

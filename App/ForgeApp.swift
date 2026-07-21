@@ -19,12 +19,21 @@ struct ForgeApp: App {
 }
 
 struct RootView: View {
+    @StateObject private var signIn = AppleSignInManager.shared
+    @State private var checkingSignIn = true
     @State private var store: AppStore?
     @State private var isLoadingProfile = true
 
     var body: some View {
         Group {
-            if isLoadingProfile {
+            if checkingSignIn {
+                ZStack {
+                    ForgeColors.backgroundWash
+                    ProgressView()
+                }
+            } else if !signIn.isSignedIn {
+                SignInView()
+            } else if isLoadingProfile {
                 ZStack {
                     ForgeColors.backgroundWash
                     ProgressView()
@@ -42,6 +51,14 @@ struct RootView: View {
             }
         }
         .task {
+            // Feature request — "sign up flow via... apple." Gates everything below it; a
+            // previously-revoked sign-in (checked against Apple's servers, not just a local flag)
+            // routes back to SignInView instead of silently proceeding into the app.
+            await signIn.refreshSignInState()
+            checkingSignIn = false
+        }
+        .task(id: signIn.isSignedIn) {
+            guard signIn.isSignedIn else { return }
             // FRG-130/131 — a returning user with a saved CloudKit profile skips onboarding
             // entirely; a brand-new user (or one without CloudKit access yet) sees it as before.
             if let (profile, program, savedPrograms, dayIndex, programStartDate) = try? await CloudKitStore.shared.fetchProfile() {
