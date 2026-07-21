@@ -42,6 +42,11 @@ enum Meal: String, CaseIterable, Identifiable, Codable {
 final class AppStore: ObservableObject {
     @Published var profile: UserProfile
     @Published var program: ProgramTemplate
+    // Feature request — "select which workout program they want to do, especially if they have
+    // multiple." The library of programs a user has built/picked; `program` is whichever one of
+    // these is currently active. Always contains `program` itself (enforced in `init` and every
+    // mutating method below), so a ProgramSelectionView tile grid never has to special-case it.
+    @Published var savedPrograms: [ProgramTemplate]
     // FRG-104 — which of program.days is "today." Programs with more than one day rotate by
     // session (advances on Finish Workout), not by calendar date — there's no weekly-schedule
     // concept (e.g. "Push is always Monday") in this app, matching how most non-calendar-locked
@@ -58,10 +63,23 @@ final class AppStore: ObservableObject {
     // what makes this correct across backgrounding. A stored countdown would just freeze in the
     // background and read stale (in fact wrong) the moment the app returns to the foreground.
     @Published var restEndDate: Date?
+    // Feature request — "when rest ends... go into negative timing." Deliberately not clamped to
+    // 0 anymore: the caller (Train's rest card) is what decides how to display a negative value
+    // as overtime, and when to fire the one-time haptic as it crosses zero.
     var restSecondsRemaining: Int {
         guard let restEndDate else { return 0 }
-        return max(0, Int(restEndDate.timeIntervalSinceNow.rounded()))
+        return Int(restEndDate.timeIntervalSinceNow.rounded())
     }
+    // Feature request — "allow users to edit rest timer." UserDefaults-backed (a local display
+    // preference, not per-user activity data — same tier as forceDarkMode/remindersEnabled — so
+    // it doesn't need a CloudKit round-trip or to survive a reinstall).
+    @Published var restDurationSeconds: Int = UserDefaults.standard.object(forKey: "restDurationSeconds") as? Int ?? 105 {
+        didSet { UserDefaults.standard.set(restDurationSeconds, forKey: "restDurationSeconds") }
+    }
+    // Feature request — set right after Finish Workout so WorkoutCompleteView/SessionReviewView
+    // have something to show; cleared once the user starts a different day's session (selectDay),
+    // since at that point there's nothing "just finished" left to review.
+    @Published var lastCompletedSession: WorkoutSession?
 
     @Published var mealEntries: [Meal: [FoodEntry]] = [.breakfast: [], .lunch: [], .dinner: [], .snacks: []]
     @Published var bodyweightLogLb: [(date: Date, weightLb: Double)]
@@ -78,9 +96,10 @@ final class AppStore: ObservableObject {
     @Published private(set) var recentFoods: [FoodSearchResult] = []
     let foodSearchService = FoodSearchService(credentials: Secrets.foodDatabaseCredentials, countryFilter: Secrets.foodDatabaseCountryFilter)
 
-    init(profile: UserProfile, program: ProgramTemplate, startingDayIndex: Int = 0, programStartDate: Date = Date()) {
+    init(profile: UserProfile, program: ProgramTemplate, savedPrograms: [ProgramTemplate] = [], startingDayIndex: Int = 0, programStartDate: Date = Date()) {
         self.profile = profile
         self.program = program
+        self.savedPrograms = savedPrograms.contains(where: { $0.id == program.id }) ? savedPrograms : savedPrograms + [program]
         self.currentProgramDayIndex = startingDayIndex
         self.programStartDate = programStartDate
         self.bodyweightLogLb = [(Date(), profile.weightKg / 0.45359237)]
@@ -143,9 +162,53 @@ final class AppStore: ObservableObject {
     // done mid-set, so resetting today's slate here is an acceptable tradeoff for staying correct.
     func updateProgram(_ newProgram: ProgramTemplate) {
         program = newProgram
+        replaceInSavedPrograms(newProgram)
         todaysExercises = Self.buildExerciseSlots(for: newProgram, week: currentProgramWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
-        Task { await SyncQueue.shared.enqueue(.profile(profile: profile, program: newProgram, dayIndex: currentProgramDayIndex, programStartDate: programStartDate)) }
+        persistProfile()
+    }
+
+    // Feature request — "select which workout program they want to do, especially if they have
+    // multiple." Switches to a different program already in the library, or activates a
+    // brand-new one just built in ProgramSelectionView. Distinct from `updateProgram`: this is
+    // "start this program" (resets to week 1, day 0), not an in-place edit of progress already
+    // made on the program currently active.
+    func activateProgram(_ selected: ProgramTemplate) {
+        replaceInSavedPrograms(selected)
+        program = selected
+        currentProgramDayIndex = 0
+        programStartDate = Date()
+        todaysExercises = Self.buildExerciseSlots(for: selected, week: 1, dayIndex: 0)
+        refreshLastPerformance()
+        lastCompletedSession = nil
+        persistProfile()
+    }
+
+    // Feature request — DaySelectionView's explicit "do this day" choice, distinct from Finish
+    // Workout's automatic rotation to the next day in sequence.
+    func selectDay(_ index: Int) {
+        currentProgramDayIndex = index
+        todaysExercises = Self.buildExerciseSlots(for: program, week: currentProgramWeek, dayIndex: index)
+        refreshLastPerformance()
+        lastCompletedSession = nil
+        persistProfile()
+    }
+
+    private func replaceInSavedPrograms(_ updated: ProgramTemplate) {
+        if let idx = savedPrograms.firstIndex(where: { $0.id == updated.id }) {
+            savedPrograms[idx] = updated
+        } else {
+            savedPrograms.append(updated)
+        }
+    }
+
+    private func persistProfile() {
+        Task {
+            await SyncQueue.shared.enqueue(.profile(
+                profile: profile, program: program, savedPrograms: savedPrograms,
+                dayIndex: currentProgramDayIndex, programStartDate: programStartDate
+            ))
+        }
     }
 
     var currentLoadScore: Double {
@@ -242,19 +305,20 @@ final class AppStore: ObservableObject {
 
         let session = WorkoutSession(date: Date(), sets: completedSets)
         trailingSessions.append(session)
+        // Feature request — congratulatory screen + review, reads this.
+        lastCompletedSession = session
         workoutsCompletedThisWeek += 1
 
         // FRG-104 — advance to the next day in the current week's rotation and rebuild the
-        // exercise list from it, rather than just resetting today's `done` flags in place.
+        // exercise list from it, rather than just resetting today's `done` flags in place. This
+        // is also what DaySelectionView highlights as the "suggested" day afterward.
         let daysThisWeek = program.days(forWeek: currentProgramWeek)
         currentProgramDayIndex = daysThisWeek.isEmpty ? 0 : (currentProgramDayIndex + 1) % daysThisWeek.count
         todaysExercises = Self.buildExerciseSlots(for: program, week: currentProgramWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
 
-        Task {
-            await SyncQueue.shared.enqueue(.workoutSession(session))
-            await SyncQueue.shared.enqueue(.profile(profile: profile, program: program, dayIndex: currentProgramDayIndex, programStartDate: programStartDate))
-        }
+        Task { await SyncQueue.shared.enqueue(.workoutSession(session)) }
+        persistProfile()
     }
 
     // FRG-112/113 — the most recent logged set for a given exercise, searched newest-session
@@ -392,7 +456,7 @@ final class AppStore: ObservableObject {
         guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }),
               let setIdx = todaysExercises[exIdx].sets.firstIndex(where: { $0.id == setID }) else { return }
         todaysExercises[exIdx].sets[setIdx].done.toggle()
-        if todaysExercises[exIdx].sets[setIdx].done { restEndDate = Date().addingTimeInterval(105) }
+        if todaysExercises[exIdx].sets[setIdx].done { restEndDate = Date().addingTimeInterval(TimeInterval(restDurationSeconds)) }
         // FRG-306 — no-op if no workout reminder is pending (reminders off, or already cancelled).
         if todaysExercises[exIdx].sets[setIdx].done { ReminderManager.shared.cancelWorkoutReminder() }
     }

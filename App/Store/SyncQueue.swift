@@ -8,7 +8,7 @@ import ForgeCore
 /// writes persist to disk (survives the app being force-quit while offline, not just backgrounded)
 /// and retry automatically once the network comes back or the app returns to the foreground.
 enum PendingWrite {
-    case profile(profile: UserProfile, program: ProgramTemplate, dayIndex: Int, programStartDate: Date)
+    case profile(profile: UserProfile, program: ProgramTemplate, savedPrograms: [ProgramTemplate], dayIndex: Int, programStartDate: Date)
     case workoutSession(WorkoutSession)
     case foodEntry(entry: FoodEntry, meal: Meal)
     case bodyweightEntry(date: Date, weightLb: Double)
@@ -17,16 +17,17 @@ enum PendingWrite {
 // Manual Codable — Swift doesn't synthesize Codable for enums with associated values.
 extension PendingWrite: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, profile, program, dayIndex, programStartDate, session, entry, meal, date, weightLb
+        case type, profile, program, savedPrograms, dayIndex, programStartDate, session, entry, meal, date, weightLb
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .profile(let profile, let program, let dayIndex, let programStartDate):
+        case .profile(let profile, let program, let savedPrograms, let dayIndex, let programStartDate):
             try container.encode("profile", forKey: .type)
             try container.encode(profile, forKey: .profile)
             try container.encode(program, forKey: .program)
+            try container.encode(savedPrograms, forKey: .savedPrograms)
             try container.encode(dayIndex, forKey: .dayIndex)
             try container.encode(programStartDate, forKey: .programStartDate)
         case .workoutSession(let session):
@@ -50,6 +51,7 @@ extension PendingWrite: Codable {
             self = .profile(
                 profile: try container.decode(UserProfile.self, forKey: .profile),
                 program: try container.decode(ProgramTemplate.self, forKey: .program),
+                savedPrograms: try container.decode([ProgramTemplate].self, forKey: .savedPrograms),
                 dayIndex: try container.decode(Int.self, forKey: .dayIndex),
                 programStartDate: try container.decode(Date.self, forKey: .programStartDate)
             )
@@ -126,8 +128,8 @@ actor SyncQueue {
 
     private func perform(_ write: PendingWrite) async throws {
         switch write {
-        case .profile(let profile, let program, let dayIndex, let programStartDate):
-            try await CloudKitStore.shared.saveProfile(profile, program: program, dayIndex: dayIndex, programStartDate: programStartDate)
+        case .profile(let profile, let program, let savedPrograms, let dayIndex, let programStartDate):
+            try await CloudKitStore.shared.saveProfile(profile, program: program, savedPrograms: savedPrograms, dayIndex: dayIndex, programStartDate: programStartDate)
         case .workoutSession(let session):
             try await CloudKitStore.shared.saveWorkoutSession(session)
         case .foodEntry(let entry, let meal):

@@ -54,24 +54,24 @@ struct ProgramEditorView: View {
                             .background(.ultraThinMaterial)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                        // Feature request — "editable timeframe."
+                        // Feature request — "editable timeframe" + numpad entry, not a Stepper —
+                        // ranging up to 52 one tap at a time is tedious.
                         HStack {
                             Text("Timeframe").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             Spacer()
-                            Stepper("\(weekCount) weeks", value: Binding(
+                            NumberField(value: Binding(
                                 get: { weekCount },
                                 set: { newCount in
                                     let clamped = max(1, newCount)
                                     if clamped > weekCount {
                                         for week in (weekCount + 1)...clamped { weeks[week] = weeks[1] ?? [] }
-                                    } else {
-                                        for week in (clamped + 1)...weekCount where week <= weekCount { weeks[week] = nil }
+                                    } else if clamped < weekCount {
+                                        for week in (clamped + 1)...weekCount { weeks[week] = nil }
                                     }
                                     weekCount = clamped
                                     if selectedWeek > clamped { selectedWeek = clamped }
                                 }
-                            ), in: 1...52)
-                            .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            ), range: 1...52, suffix: "wk")
                         }
                         .padding(12)
                         .background(.ultraThinMaterial)
@@ -232,25 +232,61 @@ private struct ExerciseRowEditor: View {
                 }
                 .buttonStyle(.plain)
             }
-            HStack(spacing: 14) {
-                Stepper("Sets: \(exercise.targetSets)", value: $exercise.targetSets, in: 1...10)
-                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            // Feature request — "allow users to edit the numbers numpad" — typed entry instead of
+            // tapping a Stepper through every value, especially painful for reps/weight ranges.
+            HStack {
+                Text("Sets").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                Spacer()
+                NumberField(value: $exercise.targetSets, range: 1...10)
             }
-            HStack(spacing: 14) {
-                Stepper("Reps: \(exercise.targetReps)", value: $exercise.targetReps, in: 1...30)
-                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            HStack {
+                Text("Reps").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                Spacer()
+                NumberField(value: $exercise.targetReps, range: 1...30)
             }
-            HStack(spacing: 14) {
-                Stepper("Weight: \(WeightUnit.roundedLb(fromKg: exercise.targetWeightKg)) lb", value: Binding(
-                    get: { WeightUnit.lb(fromKg: exercise.targetWeightKg) },
-                    set: { exercise.targetWeightKg = WeightUnit.kg(fromLb: $0) }
-                ), in: 0...600, step: 5)
-                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            HStack {
+                Text("Weight").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                Spacer()
+                NumberField(value: Binding(
+                    get: { WeightUnit.roundedLb(fromKg: exercise.targetWeightKg) },
+                    set: { exercise.targetWeightKg = WeightUnit.kg(fromLb: Double($0)) }
+                ), range: 0...600, suffix: "lb")
             }
         }
         .padding(10)
         .background(ForgeColors.tileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+/// Feature request — numeric-keypad entry, filtering to digits only and clamping to `range` as
+/// the user types, rather than a Stepper's one-tap-at-a-time increments.
+private struct NumberField: View {
+    @Binding var value: Int
+    var range: ClosedRange<Int>
+    var suffix: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TextField("", text: Binding(
+                get: { String(value) },
+                set: { newText in
+                    let digits = newText.filter(\.isNumber)
+                    let parsed = Int(digits) ?? range.lowerBound
+                    value = min(range.upperBound, max(range.lowerBound, parsed))
+                }
+            ))
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.trailing)
+            .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+            .frame(width: 44)
+            if let suffix {
+                Text(suffix).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(ForgeColors.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

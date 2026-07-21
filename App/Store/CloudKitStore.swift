@@ -25,7 +25,7 @@ actor CloudKitStore {
 
     private static let profileRecordID = CKRecord.ID(recordName: "profile")
 
-    func saveProfile(_ profile: UserProfile, program: ProgramTemplate, dayIndex: Int, programStartDate: Date) async throws {
+    func saveProfile(_ profile: UserProfile, program: ProgramTemplate, savedPrograms: [ProgramTemplate], dayIndex: Int, programStartDate: Date) async throws {
         let record = (try? await database.record(for: Self.profileRecordID)) ?? CKRecord(recordType: "Profile", recordID: Self.profileRecordID)
         record["weightKg"] = profile.weightKg
         record["heightCm"] = profile.heightCm
@@ -39,12 +39,16 @@ actor CloudKitStore {
         // exploded into individual fields — simpler and doesn't need a new CKRecord field every
         // time the program's shape grows. Always read/written as a whole, never queried piecemeal.
         record["programJSON"] = try JSONEncoder().encode(program)
+        // Feature request — "select which workout program... especially if they have multiple."
+        // The full library, `program` is just whichever entry is active. New field, additive —
+        // old records simply won't have it (see the graceful fallback in fetchProfile below).
+        record["savedProgramsJSON"] = try JSONEncoder().encode(savedPrograms)
         record["currentProgramDayIndex"] = dayIndex
         record["programStartDate"] = programStartDate
         _ = try await database.save(record)
     }
 
-    func fetchProfile() async throws -> (profile: UserProfile, program: ProgramTemplate, dayIndex: Int, programStartDate: Date)? {
+    func fetchProfile() async throws -> (profile: UserProfile, program: ProgramTemplate, savedPrograms: [ProgramTemplate], dayIndex: Int, programStartDate: Date)? {
         guard let record = try? await database.record(for: Self.profileRecordID),
               let weightKg = record["weightKg"] as? Double,
               let heightCm = record["heightCm"] as? Double,
@@ -58,9 +62,18 @@ actor CloudKitStore {
 
         let profile = UserProfile(weightKg: weightKg, heightCm: heightCm, age: age, sex: sex, activityLevel: activityLevel,
                                    goal: goal, fatFreeMassKg: record["fatFreeMassKg"] as? Double)
+        // Older records predate savedProgramsJSON entirely — default to a single-program library
+        // rather than failing the whole fetch over one missing optional field.
+        let savedPrograms: [ProgramTemplate]
+        if let savedProgramsData = record["savedProgramsJSON"] as? Data,
+           let decoded = try? JSONDecoder().decode([ProgramTemplate].self, from: savedProgramsData) {
+            savedPrograms = decoded
+        } else {
+            savedPrograms = [program]
+        }
         let dayIndex = record["currentProgramDayIndex"] as? Int ?? 0
         let programStartDate = record["programStartDate"] as? Date ?? Date()
-        return (profile, program, dayIndex, programStartDate)
+        return (profile, program, savedPrograms, dayIndex, programStartDate)
     }
 
     // MARK: Workout sessions — sets serialized as JSON; a session is small enough that a child

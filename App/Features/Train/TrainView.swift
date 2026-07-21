@@ -1,10 +1,66 @@
 import SwiftUI
+import UIKit
 import ForgeCore
 
+/// Feature request — "[program selection] should be the screen that initiates and funnels down
+/// to the other screens." Train's root: ProgramSelectionView -> DaySelectionView -> TrainSessionView,
+/// with WorkoutCompleteView as a full-screen cover after Finish Workout that hands back to
+/// DaySelectionView (item 3: review the just-finished session, or pick a different day).
 struct TrainView: View {
     @EnvironmentObject var store: AppStore
+    @State private var path: [TrainRoute] = []
+    @State private var showingCompleteScreen = false
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            ProgramSelectionView {
+                path.append(.daySelection)
+            }
+            .navigationDestination(for: TrainRoute.self) { route in
+                switch route {
+                case .daySelection:
+                    DaySelectionView(
+                        onSelectDay: { index in
+                            store.selectDay(index)
+                            path.append(.session)
+                        },
+                        onReview: { path.append(.review) }
+                    )
+                case .session:
+                    TrainSessionView {
+                        showingCompleteScreen = true
+                    }
+                case .review:
+                    SessionReviewView()
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showingCompleteScreen) {
+            WorkoutCompleteView {
+                showingCompleteScreen = false
+                // Item 3 — back to day selection so they can review what they just did or pick
+                // something else, rather than dumping them back into an empty logging screen.
+                path = [.daySelection]
+            }
+        }
+    }
+}
+
+private enum TrainRoute: Hashable {
+    case daySelection
+    case session
+    case review
+}
+
+/// The actual per-day logging screen — exercise cards, rest timer, Finish Workout. Reached via
+/// DaySelectionView, never directly from the tab bar anymore.
+struct TrainSessionView: View {
+    @EnvironmentObject var store: AppStore
+    var onFinished: () -> Void
+
     @State private var addingExercise = false
     @State private var editingProgram = false
+    @State private var editingRestDuration = false
     @State private var showFutureWeeksPromptForAdd = false
 
     var body: some View {
@@ -37,22 +93,7 @@ struct TrainView: View {
                         }
                     }
 
-                    // FRG-111 — ticks every second off the current clock rather than a decremented
-                    // stored counter, so the label is always correct even after backgrounding for
-                    // a while mid-rest (a stored countdown would just freeze while backgrounded).
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        GlassCard {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("REST").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-                                    Text(restLabel).font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
-                                }
-                                Spacer()
-                                Button("Reset") { store.restEndDate = Date().addingTimeInterval(105) }
-                                    .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
-                            }
-                        }
-                    }
+                    RestTimerCard(editingRestDuration: $editingRestDuration)
 
                     ForEach(store.todaysExercises) { slot in
                         ExerciseCard(slot: slot)
@@ -69,6 +110,7 @@ struct TrainView: View {
 
                     Button {
                         store.finishWorkout()
+                        onFinished()
                     } label: {
                         Text("Finish Workout").font(ForgeType.title).frame(maxWidth: .infinity)
                             .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
@@ -81,6 +123,8 @@ struct TrainView: View {
                 .padding(.bottom, 40)
             }
         }
+        .navigationTitle(store.currentProgramDayName)
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $addingExercise) {
             ExercisePickerSheet { exercise in
                 store.addExercise(exercise)
@@ -92,12 +136,95 @@ struct TrainView: View {
                 store.updateProgram(updatedProgram)
             }
         }
+        .sheet(isPresented: $editingRestDuration) {
+            RestDurationSheet(seconds: store.restDurationSeconds) { newSeconds in
+                store.restDurationSeconds = newSeconds
+            }
+        }
         .futureWeeksPrompt(isPresented: $showFutureWeeksPromptForAdd, store: store)
     }
+}
 
-    private var restLabel: String {
-        let m = store.restSecondsRemaining / 60, s = store.restSecondsRemaining % 60
-        return String(format: "%d:%02d", m, s)
+/// Feature request — "allow users to edit rest timer" + "when rest ends, provide a vibrate and go
+/// into negative timing." `TimelineView` re-evaluates every second, which is what both the
+/// countdown display and the one-shot haptic (`.task(id:)`, fires once per distinct value) depend
+/// on — a plain `@State` timer would freeze while the app is backgrounded.
+private struct RestTimerCard: View {
+    @EnvironmentObject var store: AppStore
+    @Binding var editingRestDuration: Bool
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            let remaining = store.restSecondsRemaining
+            GlassCard {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("REST").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                        Text(label(for: remaining)).font(ForgeType.displayMedium)
+                            .foregroundStyle(remaining < 0 ? Color.red : ForgeColors.ink)
+                    }
+                    Spacer()
+                    Button { editingRestDuration = true } label: {
+                        Image(systemName: "pencil").font(.caption).foregroundStyle(ForgeColors.inkMuted)
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.plain)
+                    Button("Reset") { store.restEndDate = Date().addingTimeInterval(TimeInterval(store.restDurationSeconds)) }
+                        .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
+                }
+            }
+            .task(id: remaining) {
+                if remaining == 0 { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+            }
+        }
+    }
+
+    private func label(for remaining: Int) -> String {
+        let overtime = remaining < 0
+        let displaySeconds = abs(remaining)
+        let m = displaySeconds / 60, s = displaySeconds % 60
+        return (overtime ? "+" : "") + String(format: "%d:%02d", m, s)
+    }
+}
+
+private struct RestDurationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let seconds: Int
+    var onSave: (Int) -> Void
+    @State private var selected: Int
+
+    init(seconds: Int, onSave: @escaping (Int) -> Void) {
+        self.seconds = seconds
+        self.onSave = onSave
+        _selected = State(initialValue: seconds)
+    }
+
+    private let options = Array(stride(from: 0, through: 600, by: 15))
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Capsule().fill(ForgeColors.cardBorder).frame(width: 36, height: 4).frame(maxWidth: .infinity)
+            Text("Rest duration").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+            // Scrollable wheel, not a stepper — every value directly reachable.
+            Picker("Rest duration", selection: $selected) {
+                ForEach(options, id: \.self) { s in
+                    Text(String(format: "%d:%02d", s / 60, s % 60)).tag(s)
+                }
+            }
+            .pickerStyle(.wheel)
+            .frame(height: 140)
+            Button {
+                onSave(selected)
+                dismiss()
+            } label: {
+                Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
+                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(22)
+        .presentationDetents([.height(320)])
     }
 }
 
