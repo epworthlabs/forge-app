@@ -168,6 +168,13 @@ All five: `swift test` (43/43) + `xcodebuild` BUILD SUCCEEDED + fresh install/la
 
 `swift test` (46/46) + `xcodebuild` BUILD SUCCEEDED + fresh install confirmed the real icon on the Simulator home screen and the in-app lockup on onboarding.
 
+**FRG-344 — swap in the real, final icon/logo files (2026-07-21)**: "use these instead for logo and icon" — the user supplied the actual approved `icon.png` (360×360, dual-ring mark on a blue diagonal gradient) and `logo.png` (432×166, "TRAKT" wordmark on a white card) directly, superseding FRG-343's design-doc approximation with pixel-exact files.
+
+- **Icon**: iOS requires a full opaque square with no pre-baked corner rounding, but the source file has transparent rounded corners — sampled the source's own corner pixel colors (top-left ≈ RGB(0,99,204), bottom-right ≈ RGB(0,102,180)) to regenerate a matching full-bleed 1024×1024 gradient, then alpha-composited a LANCZOS-upscaled copy of the source on top. Seamless, since the background was reconstructed from the source's own colors rather than guessed. Overwrote `Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` directly.
+- **In-app assets**: added `AppMark`/`TraktLogo` image sets (raw source PNGs, each with a `Contents.json`); `SignInView` and `OnboardingView` now use `Image("AppMark")`/`Image("TraktLogo")` instead of the vector approximation. Deleted the now-dead `TraktMark`/`TraktWordmark` SwiftUI structs from `LiquidComponents.swift` — no other call sites remained.
+
+`swift test` (46/46) + `xcodebuild` BUILD SUCCEEDED + fresh install/launch confirmed both spots: the real dual-ring icon renders cleanly on the Simulator home screen (iOS's own mask rounds the corners, no seam from the composite), and the real mark + "TRAKT" wordmark render correctly in onboarding's header lockup.
+
 **Not started:** the program editor doesn't expose deload scheduling in its UI yet (only the curated 5/3/1 template has `deloadEveryNWeeks` set, via direct construction). See `../engineering-backlog.html`.
 
 **Also needed before shipping, not before building:**

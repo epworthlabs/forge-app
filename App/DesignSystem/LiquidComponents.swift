@@ -108,63 +108,6 @@ struct LiquidMacroRow: View {
     }
 }
 
-/// Feature request — "logo and app icon are in claude design, retrieve and skin the app icon and
-/// also include the logo in the app where you see fit." Pulled from the claude.ai/design project
-/// (finalists 5a icon + 5b wordmark, "Dual Ring — Bold" on a deep indigo gradient tile). Colors are
-/// exact OKLCH→sRGB conversions of the design's tokens — `wordmark_ink` came out identical to
-/// `ForgeColors.ink`'s own light-mode value, confirming the design already used this app's palette.
-/// Vector, not a raster asset, so it scales cleanly and stays crisp at any size in-app; the actual
-/// home-screen app icon (a required static bitmap) is rendered separately into
-/// `Assets.xcassets/AppIcon.appiconset`.
-struct TraktMark: View {
-    var size: CGFloat = 108
-    /// nil renders just the rings (e.g. over an existing background); set a value to draw the
-    /// full gradient tile behind them, matching the app-icon presentation.
-    var tileCornerRadius: CGFloat? = nil
-
-    private static let ringWhite = Color.white
-    private static let innerRingAccent = Color(red: 90.0/255, green: 245.0/255, blue: 210.0/255)
-    private static let tileStart = Color(red: 4.0/255, green: 98.0/255, blue: 211.0/255)
-    private static let tileEnd = Color(red: 0, green: 103.0/255, blue: 174.0/255)
-
-    var body: some View {
-        ZStack {
-            if let tileCornerRadius {
-                RoundedRectangle(cornerRadius: tileCornerRadius, style: .continuous)
-                    .fill(LinearGradient(colors: [Self.tileStart, Self.tileEnd], startPoint: .topLeading, endPoint: .bottomTrailing))
-            }
-            ring(diameterFrac: 0.6111, offsetXFrac: -0.10185, offsetYFrac: 0.00926, fillFrac: 0.7480, fillColor: Self.ringWhite)
-            ring(diameterFrac: 0.40741, offsetXFrac: 0.14815, offsetYFrac: -0.03704, fillFrac: 0.6512, fillColor: Self.innerRingAccent)
-        }
-        .frame(width: size, height: size)
-    }
-
-    private func ring(diameterFrac: Double, offsetXFrac: Double, offsetYFrac: Double, fillFrac: Double, fillColor: Color) -> some View {
-        let diameter = size * diameterFrac
-        let strokeW = size * 0.13889
-        return ZStack {
-            Circle().stroke(Color.white.opacity(0.3), lineWidth: strokeW)
-            Circle().trim(from: 0, to: fillFrac)
-                .stroke(fillColor, style: StrokeStyle(lineWidth: strokeW, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-        .frame(width: diameter, height: diameter)
-        .offset(x: size * offsetXFrac, y: size * offsetYFrac)
-    }
-}
-
-/// The "TRAKT" wordmark (design option 5b) — heavy weight, wide letter-spacing, all caps.
-struct TraktWordmark: View {
-    var size: CGFloat = 22
-
-    var body: some View {
-        Text("TRAKT")
-            .font(.system(size: size, weight: .heavy))
-            .tracking(size * 0.16)
-            .foregroundStyle(ForgeColors.ink)
-    }
-}
-
 /// Feature request — "give a default avatar... let users edit... upload a photo." Falls back to
 /// a plain SF Symbol silhouette when no photo has been picked, rather than an empty box.
 struct AvatarView: View {

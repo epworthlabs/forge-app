@@ -12,8 +12,14 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 18) {
                 // Feature request — "include the logo in the app where you see fit."
                 HStack(spacing: 8) {
-                    TraktMark(size: 26, tileCornerRadius: 8)
-                    TraktWordmark(size: 15)
+                    Image("AppMark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 26, height: 26)
+                    Image("TraktLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 15)
                 }
                 .padding(.bottom, 4)
 
