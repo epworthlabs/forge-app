@@ -88,7 +88,15 @@ struct YouView: View {
                             }
                         }
                     }
-                }
+
+                    // FRG-122/FRG-121 — attribution both food-database sources require as a
+                    // condition of free-tier use, not decorative: FatSecret's terms require a
+                    // "Powered by FatSecret" credit, and Open Food Facts data is ODbL-licensed
+                    // (attribution required, same as a code license).
+                    Text("Food data from USDA FoodData Central, Open Food Facts (ODbL), and FatSecret.")
+                        .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        .padding(.top, 4)
+}
                 .padding(20)
                 .padding(.bottom, 90)
             }
