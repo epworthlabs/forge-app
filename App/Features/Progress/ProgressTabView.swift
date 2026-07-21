@@ -5,6 +5,7 @@ import ForgeCore
 
 struct ProgressTabView: View {
     @EnvironmentObject var store: AppStore
+    @ObservedObject private var referral = ReferralManager.shared
     @State private var loggingWeight = false
     @State private var nutritionSummary: AppStore.NutritionWeekSummary?
     @State private var liftProgressionExpanded = true
@@ -92,15 +93,22 @@ struct ProgressTabView: View {
                     // progressions" (promoted out of the collapsed disclosure it used to share
                     // with the calendar), then "make lift progression collapsable" — defaults
                     // open since it's the primary lift-tracking view now, not a buried extra.
+                    // Feature request — "place a referral wall on the lift progression section...
+                    // if that person signs up, unlock this feature." Gated behind ReferralManager
+                    // rather than the section itself, so nothing else in Progress is affected.
                     GlassCard {
-                        DisclosureGroup("LIFT PROGRESSION", isExpanded: $liftProgressionExpanded) {
-                            LiftProgressionView(sessions: store.trailingSessions)
-                                .padding(.top, 10)
+                        if referral.isUnlocked {
+                            DisclosureGroup("LIFT PROGRESSION", isExpanded: $liftProgressionExpanded) {
+                                LiftProgressionView(sessions: store.trailingSessions)
+                                    .padding(.top, 10)
+                            }
+                            .font(ForgeType.label)
+                            .foregroundStyle(ForgeColors.inkMuted)
+                            .tint(ForgeColors.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            LiftProgressionReferralGate(referral: referral)
                         }
-                        .font(ForgeType.label)
-                        .foregroundStyle(ForgeColors.inkMuted)
-                        .tint(ForgeColors.ink)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     // Feature request — "don't make the workout calendar collapsable, keep it
@@ -261,6 +269,43 @@ private struct WorkoutCalendarView: View {
         if let newMonth = calendar.date(byAdding: .month, value: offset, to: displayedMonth) {
             displayedMonth = newMonth
         }
+    }
+}
+
+/// Feature request — "place a referral wall on the lift progression section... send the link out
+/// to one person in order to unlock this feature, if that person signs up, unlock this feature."
+/// Shown in place of `LiftProgressionView` until `ReferralManager.isUnlocked` flips true.
+private struct LiftProgressionReferralGate: View {
+    @ObservedObject var referral: ReferralManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("LIFT PROGRESSION").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                Spacer()
+                Image(systemName: "lock.fill").font(.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+            Text("Invite a friend to unlock your lift-by-lift progression charts. Share your code below — once they finish setting up their profile, this unlocks automatically.")
+                .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+
+            HStack {
+                Text(referral.myCode)
+                    .font(ForgeType.title).fontWeight(.bold).foregroundStyle(ForgeColors.ink)
+                    .tracking(2)
+                Spacer()
+                if referral.isCheckingStatus {
+                    ProgressView().controlSize(.mini)
+                }
+                ShareLink(item: referral.shareMessage) {
+                    Text("Share").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                }
+            }
+            .padding(12)
+            .background(ForgeColors.tileBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task { await referral.refreshStatus() }
     }
 }
 

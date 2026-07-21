@@ -49,8 +49,40 @@ async function getAccessToken() {
 }
 
 const app = express();
+app.use(express.json());
 
 app.get("/health", (req, res) => res.status(200).send("ok"));
+
+// Feature request — "place a referral wall on the lift progression section... if that person
+// signs up, unlock this feature." No account system exists (Sign in with Apple is disconnected,
+// CloudKit is per-iCloud-account private data), so referral codes are generated client-side and
+// this store is just "has this code been redeemed" — in-memory, not backed by a database, since a
+// free Render instance's disk/memory resets on redeploy/restart anyway and this is a single-friend
+// test feature for now, not a scaled referral program.
+const redeemedCodes = new Set();
+
+app.post("/referral/redeem", (req, res) => {
+  if (req.header("X-App-Secret") !== APP_SHARED_SECRET) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const code = req.body?.code;
+  if (!code || typeof code !== "string") {
+    return res.status(400).json({ error: "missing code" });
+  }
+  redeemedCodes.add(code.toUpperCase());
+  res.status(200).json({ redeemed: true });
+});
+
+app.get("/referral/status", (req, res) => {
+  if (req.header("X-App-Secret") !== APP_SHARED_SECRET) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const code = req.query.code;
+  if (!code || typeof code !== "string") {
+    return res.status(400).json({ error: "missing code parameter" });
+  }
+  res.status(200).json({ redeemed: redeemedCodes.has(code.toUpperCase()) });
+});
 
 app.get("/search", async (req, res) => {
   if (req.header("X-App-Secret") !== APP_SHARED_SECRET) {

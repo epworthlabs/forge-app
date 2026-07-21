@@ -323,6 +323,7 @@ private struct ProgramSelectStep: View {
     var onComplete: (UserProfile, ProgramTemplate) -> Void
     @State private var buildingCustomProgram = false
     @State private var customProgram: ProgramTemplate?
+    @State private var inviteCode = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -386,6 +387,20 @@ private struct ProgramSelectStep: View {
                 }
             }
 
+            // Feature request — referral wall on Progress's Lift Progression section: whoever
+            // invited this person unlocks it once this field is filled in and onboarding finishes.
+            // Optional — most people arrive without one.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Invite code (optional)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                TextField("e.g. 7K2P9Q", text: $inviteCode)
+                    .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .padding(12)
+                    .background(ForgeColors.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
             ContinueButton(title: "Enter App", enabled: model.canEnterApp) {
                 guard let profile = model.buildProfile(),
                       let program = model.selectedProgram else { return }
@@ -395,6 +410,8 @@ private struct ProgramSelectStep: View {
                     "program_name": program.name,
                     "goal": model.goal?.displayLabel ?? "unknown",
                 ])
+                let code = inviteCode
+                Task { await ReferralManager.shared.redeem(code: code) }
                 onComplete(profile, program)
             }
         }

@@ -406,49 +406,65 @@ private struct EditableSetRow: View {
     var body: some View {
         HStack(spacing: 10) {
             // Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb
-            // increments as well" + "limit... weights... to 3 digits max."
+            // increments as well." Typed entry for getting to a specific number fast, plus the
+            // existing quick-adjust buttons for small in-set corrections.
             WeightNumberField(weightLb: Binding(
                 get: { WeightUnit.lb(fromKg: set.weightKg) },
                 set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: WeightUnit.kg(fromLb: $0), reps: set.reps) }
             ))
-            // Feature request — "limit the set and rep ranges to be 2 digits max," same numpad
-            // treatment as weight rather than a Stepper-only control.
-            HStack(spacing: 6) {
-                IconButton(systemName: "minus", action: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: max(1, set.reps - 1)) }, size: 36)
-                NumpadField(value: Binding(
-                    get: { set.reps },
-                    set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
-                ), maxDigits: 2, range: 1...50)
-                Text("reps").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                IconButton(systemName: "plus", action: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: min(50, set.reps + 1)) }, size: 36)
+            Stepper(value: Binding(
+                get: { set.reps },
+                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
+            ), in: 1...50) {
+                Text("\(set.reps) reps").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
             }
             if canRemove {
-                IconButton(systemName: "trash", action: { store.removeSet(exerciseID: exerciseID, setID: set.id) }, size: 36)
+                Button { store.removeSet(exerciseID: exerciseID, setID: set.id) } label: {
+                    Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(10)
+        .padding(9)
         .background(ForgeColors.tileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
 /// Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb increments
-/// as well." A digit-filtered numeric-keypad field for typing an exact number directly, flanked
-/// by the existing quick-adjust buttons for small corrections mid-set.
+/// as well." A digit-filtered numeric-keypad TextField for typing an exact number directly,
+/// flanked by the existing quick-adjust buttons for small corrections mid-set.
 private struct WeightNumberField: View {
     @Binding var weightLb: Double
 
     var body: some View {
         HStack(spacing: 6) {
-            IconButton(systemName: "minus", action: { weightLb = max(0, weightLb - 5) }, size: 36)
-            HStack(spacing: 4) {
-                NumpadField(value: Binding(
-                    get: { Int(weightLb.rounded()) },
-                    set: { weightLb = Double($0) }
-                ), maxDigits: 3, range: 0...999)
+            Button { weightLb = max(0, weightLb - 5) } label: {
+                Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 3) {
+                TextField("", text: Binding(
+                    get: { String(Int(weightLb.rounded())) },
+                    set: { newText in
+                        let digits = newText.filter(\.isNumber)
+                        weightLb = min(1100, max(0, Double(digits) ?? 0))
+                    }
+                ))
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                .frame(width: 34)
                 Text("lb").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             }
-            IconButton(systemName: "plus", action: { weightLb = min(999, weightLb + 5) }, size: 36)
+
+            Button { weightLb = min(1100, weightLb + 5) } label: {
+                Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+            }
+            .buttonStyle(.plain)
         }
     }
 }
