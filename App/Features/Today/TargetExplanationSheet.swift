@@ -17,9 +17,18 @@ struct TargetExplanationSheet: View {
             if target.weeklyRecalibrationKcal != 0 {
                 ExplanationRow(label: "Weekly trend recalibration", value: signedKcal(target.weeklyRecalibrationKcal))
             }
-            ExplanationRow(label: "Today's Load Score", value: String(format: "%.1f× %@", target.loadScore, loadDescriptor(target.loadScore)), accent: true)
+            // Deliberately store.currentLoadScore here, not target.loadScore — the target's
+            // internal loadScore is already sleep-dampened for the calorie math, but this row is
+            // meant to show what you actually did in training, undampened, same transparency
+            // principle as breaking weekly recalibration out as its own line.
+            ExplanationRow(label: "Today's Load Score", value: String(format: "%.1f× %@", store.currentLoadScore, loadDescriptor(store.currentLoadScore)), accent: true)
             ExplanationRow(label: "Adjustment", value: adjustmentText(target))
             ExplanationRow(label: "Protein (unchanged)", value: "\(Int(target.proteinG))g anchor", muted: true)
+
+            if store.sleepRecoveryFlagged {
+                Text("Poor sleep last night is limiting today's increase — recovery matters as much as fuel.")
+                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).padding(.top, 8)
+            }
 
             if target.redSFloorApplied {
                 Text("Your target was held at a safety floor today rather than reduced further, regardless of Load Score.")

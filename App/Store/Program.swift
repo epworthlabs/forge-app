@@ -23,6 +23,10 @@ struct ProgramTemplate: Identifiable, Hashable, Codable {
     var name: String
     var weeks: Int
     var days: [ProgramDay]
+    // FRG-206 — nil means no scheduled deloads (the default for custom programs, which don't
+    // expose this in the builder UI yet). 5/3/1's classic structure has a deload every 4th week
+    // built in, so the curated template sets this explicitly.
+    var deloadEveryNWeeks: Int? = nil
 
     var daysPerWeek: Int { days.count }
     var meta: String { "\(daysPerWeek) days/wk · \(weeks) weeks" }

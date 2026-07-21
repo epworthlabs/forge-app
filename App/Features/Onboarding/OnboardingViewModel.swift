@@ -50,7 +50,7 @@ final class OnboardingViewModel: ObservableObject {
             ProgramDay(name: "Bench Day", exercises: [ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 5, targetReps: 5, targetWeightKg: 60)]),
             ProgramDay(name: "Deadlift Day", exercises: [ProgramExercise(exerciseName: "Barbell Deadlift", targetSets: 5, targetReps: 5, targetWeightKg: 100)]),
             ProgramDay(name: "Press Day", exercises: [ProgramExercise(exerciseName: "Standing Military Press", targetSets: 5, targetReps: 5, targetWeightKg: 40)]),
-        ]),
+        ], deloadEveryNWeeks: 4), // 5/3/1's classic structure: 3 weeks building intensity, 4th week deload
         ProgramTemplate(id: "ul", name: "Upper/Lower Hypertrophy", weeks: 10, days: [
             ProgramDay(name: "Upper A", exercises: [
                 ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 4, targetReps: 10, targetWeightKg: 55),

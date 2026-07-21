@@ -1,10 +1,10 @@
 import Foundation
 
-public enum Sex: String, Sendable {
+public enum Sex: String, Sendable, Codable {
     case male, female
 }
 
-public enum ActivityLevel: Double, Sendable {
+public enum ActivityLevel: Double, Sendable, Codable {
     case low = 1.2
     case moderate = 1.375
     case high = 1.55
@@ -12,7 +12,7 @@ public enum ActivityLevel: Double, Sendable {
     var multiplier: Double { rawValue }
 }
 
-public enum Goal: String, Sendable {
+public enum Goal: String, Sendable, Codable {
     case cut, bulk, maintain, recomp
 
     /// Midpoint of the PRD's researched adjustment ranges (cut −15–25%, bulk +10–15%).
@@ -33,7 +33,7 @@ public enum Goal: String, Sendable {
     }
 }
 
-public struct UserProfile: Sendable {
+public struct UserProfile: Sendable, Codable {
     public var weightKg: Double
     public var heightCm: Double
     public var age: Int

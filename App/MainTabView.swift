@@ -33,6 +33,10 @@ struct MainTabView: View {
             // FRG-306 — re-evaluate tonight's reminders whenever the app backgrounds, so a
             // reminder already satisfied earlier today never re-fires after a stale schedule.
             if phase == .background, remindersEnabled { store.refreshReminders() }
+            // FRG-114 — catches the case where the app was force-quit while offline: network
+            // restore alone can't trigger a flush if nothing was running to observe it, so also
+            // flush whenever the app comes back to the foreground.
+            if phase == .active { Task { await SyncQueue.shared.flush() } }
         }
     }
 }

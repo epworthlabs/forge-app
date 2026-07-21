@@ -19,7 +19,7 @@ struct ExerciseSlot: Identifiable, Equatable {
     var sets: [LoggedSet]
 }
 
-struct FoodEntry: Identifiable, Equatable {
+struct FoodEntry: Identifiable, Equatable, Codable {
     let id = UUID()
     var date: Date = Date()
     var name: String
@@ -29,7 +29,7 @@ struct FoodEntry: Identifiable, Equatable {
     var fatG: Int
 }
 
-enum Meal: String, CaseIterable, Identifiable {
+enum Meal: String, CaseIterable, Identifiable, Codable {
     case breakfast = "Breakfast", lunch = "Lunch", dinner = "Dinner", snacks = "Snacks"
     var id: String { rawValue }
 }
@@ -47,6 +47,10 @@ final class AppStore: ObservableObject {
     // concept (e.g. "Push is always Monday") in this app, matching how most non-calendar-locked
     // splits (PPL, Upper/Lower) actually get run in practice.
     @Published var currentProgramDayIndex: Int
+    // FRG-206 — when the program started, so "which week are we in" (and therefore "is this a
+    // scheduled deload week") can be computed without a separate week counter that could drift
+    // out of sync with actual elapsed time.
+    @Published var programStartDate: Date
 
     @Published var trailingSessions: [WorkoutSession] = []
     @Published var todaysExercises: [ExerciseSlot]
@@ -74,13 +78,25 @@ final class AppStore: ObservableObject {
     @Published private(set) var recentFoods: [FoodSearchResult] = []
     let foodSearchService = FoodSearchService(credentials: Secrets.foodDatabaseCredentials, countryFilter: Secrets.foodDatabaseCountryFilter)
 
-    init(profile: UserProfile, program: ProgramTemplate, startingDayIndex: Int = 0) {
+    init(profile: UserProfile, program: ProgramTemplate, startingDayIndex: Int = 0, programStartDate: Date = Date()) {
         self.profile = profile
         self.program = program
         self.currentProgramDayIndex = startingDayIndex
+        self.programStartDate = programStartDate
         self.bodyweightLogLb = [(Date(), profile.weightKg / 0.45359237)]
         self.todaysExercises = Self.buildExerciseSlots(for: program, dayIndex: startingDayIndex)
         refreshLastPerformance()
+    }
+
+    // FRG-206 — 1-indexed; week 1 is the week the program was started in, not the epoch.
+    var currentProgramWeek: Int {
+        let elapsedDays = Calendar.current.dateComponents([.day], from: programStartDate, to: Date()).day ?? 0
+        return max(1, elapsedDays / 7 + 1)
+    }
+
+    var isDeloadWeek: Bool {
+        guard let interval = program.deloadEveryNWeeks, interval > 0 else { return false }
+        return currentProgramWeek % interval == 0
     }
 
     // FRG-104 — the whole point of a "program": turns its day-by-day exercise list into the
@@ -110,12 +126,23 @@ final class AppStore: ObservableObject {
         let today = WorkoutSession(date: Date(), sets: todaysExercises.flatMap { slot in
             slot.sets.filter(\.done).map { SetLog(weightKg: $0.weightKg, reps: $0.reps, rpe: $0.rpe, exerciseName: slot.exercise.name) }
         })
-        return LoadScoreCalculator.loadScore(today: today, trailingSessions: trailingSessions)
+        let raw = LoadScoreCalculator.loadScore(today: today, trailingSessions: trailingSessions)
+        // FRG-206 — a scheduled deload week forces the score down regardless of trailing volume,
+        // same intent as the missed-session case (near-zero volume naturally does this already)
+        // but for a week that's *planned* to be lighter, not accidentally skipped.
+        return isDeloadWeek ? min(raw, 0.6) : raw
     }
+
+    // FRG-305 — dampens today's Load Score if last night's sleep (from FRG-304's HealthKit read)
+    // was poor; never adds calories on its own, only pulls back an already-elevated day.
+    private var sleepAdjustedLoadScore: SleepModifier.Result {
+        SleepModifier.dampen(loadScore: currentLoadScore, sleepHours: lastNightSleepHours)
+    }
+    var sleepRecoveryFlagged: Bool { sleepAdjustedLoadScore.recoveryFlagged }
 
     var nutritionTarget: NutritionTarget {
         let recalibration = WeeklyRecalibrationEngine.recalibratedBaselineAdjustment(profile: profile, weighIns: bodyweightLogLb)
-        return NutritionTargetEngine.calculate(profile: profile, loadScore: currentLoadScore, weeklyRecalibrationKcal: recalibration)
+        return NutritionTargetEngine.calculate(profile: profile, loadScore: sleepAdjustedLoadScore.adjustedLoadScore, weeklyRecalibrationKcal: recalibration)
     }
 
     var hasTrainingHistory: Bool { !trailingSessions.isEmpty }
@@ -167,7 +194,7 @@ final class AppStore: ObservableObject {
         // FRG-306 — no-op if no meal reminder is pending (reminders off, or already cancelled).
         ReminderManager.shared.cancelMealReminder()
 
-        Task { try? await CloudKitStore.shared.saveFoodEntry(entry, meal: meal) }
+        Task { await SyncQueue.shared.enqueue(.foodEntry(entry: entry, meal: meal)) }
     }
 
     // FRG-130/131 — appends a new weigh-in; there was previously no UI path that ever grew
@@ -175,7 +202,7 @@ final class AppStore: ObservableObject {
     func logWeight(_ weightLb: Double) {
         let entry = (date: Date(), weightLb: weightLb)
         bodyweightLogLb.append(entry)
-        Task { try? await CloudKitStore.shared.saveBodyweightEntry(date: entry.date, weightLb: entry.weightLb) }
+        Task { await SyncQueue.shared.enqueue(.bodyweightEntry(date: entry.date, weightLb: entry.weightLb)) }
     }
 
     // FRG-130/131 — archives today's completed sets into training history and resets the slate
@@ -198,8 +225,8 @@ final class AppStore: ObservableObject {
         refreshLastPerformance()
 
         Task {
-            try? await CloudKitStore.shared.saveWorkoutSession(session)
-            try? await CloudKitStore.shared.saveProfile(profile, program: program, dayIndex: currentProgramDayIndex)
+            await SyncQueue.shared.enqueue(.workoutSession(session))
+            await SyncQueue.shared.enqueue(.profile(profile: profile, program: program, dayIndex: currentProgramDayIndex, programStartDate: programStartDate))
         }
     }
 

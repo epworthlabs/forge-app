@@ -25,7 +25,7 @@ actor CloudKitStore {
 
     private static let profileRecordID = CKRecord.ID(recordName: "profile")
 
-    func saveProfile(_ profile: UserProfile, program: ProgramTemplate, dayIndex: Int) async throws {
+    func saveProfile(_ profile: UserProfile, program: ProgramTemplate, dayIndex: Int, programStartDate: Date) async throws {
         let record = (try? await database.record(for: Self.profileRecordID)) ?? CKRecord(recordType: "Profile", recordID: Self.profileRecordID)
         record["weightKg"] = profile.weightKg
         record["heightCm"] = profile.heightCm
@@ -42,10 +42,12 @@ actor CloudKitStore {
         record["programDaysJSON"] = try JSONEncoder().encode(program.days)
         record["programWeeks"] = program.weeks
         record["currentProgramDayIndex"] = dayIndex
+        record["programDeloadEveryNWeeks"] = program.deloadEveryNWeeks
+        record["programStartDate"] = programStartDate
         _ = try await database.save(record)
     }
 
-    func fetchProfile() async throws -> (profile: UserProfile, program: ProgramTemplate, dayIndex: Int)? {
+    func fetchProfile() async throws -> (profile: UserProfile, program: ProgramTemplate, dayIndex: Int, programStartDate: Date)? {
         guard let record = try? await database.record(for: Self.profileRecordID),
               let weightKg = record["weightKg"] as? Double,
               let heightCm = record["heightCm"] as? Double,
@@ -66,9 +68,11 @@ actor CloudKitStore {
         } else {
             days = [] // records saved before FRG-104 won't have this field
         }
-        let program = ProgramTemplate(id: programID, name: programName, weeks: programWeeks, days: days)
+        let program = ProgramTemplate(id: programID, name: programName, weeks: programWeeks, days: days,
+                                       deloadEveryNWeeks: record["programDeloadEveryNWeeks"] as? Int)
         let dayIndex = record["currentProgramDayIndex"] as? Int ?? 0
-        return (profile, program, dayIndex)
+        let programStartDate = record["programStartDate"] as? Date ?? Date()
+        return (profile, program, dayIndex, programStartDate)
     }
 
     // MARK: Workout sessions — sets serialized as JSON; a session is small enough that a child

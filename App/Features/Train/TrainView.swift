@@ -14,6 +14,15 @@ struct TrainView: View {
                         Text("Log Workout").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
                     }
 
+                    // FRG-206 — a scheduled deload week, not a missed one; surfaced so a lighter
+                    // Load Score today reads as intentional rather than a tracking gap.
+                    if store.isDeloadWeek {
+                        HStack(spacing: 8) {
+                            Image(systemName: "leaf.fill").foregroundStyle(ForgeColors.accent).font(.caption)
+                            Text("Deload week — planned lighter load").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        }
+                    }
+
                     // FRG-111 — ticks every second off the current clock rather than a decremented
                     // stored counter, so the label is always correct even after backgrounding for
                     // a while mid-rest (a stored countdown would just freeze while backgrounded).
