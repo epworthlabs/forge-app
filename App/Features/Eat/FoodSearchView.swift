@@ -55,7 +55,7 @@ struct FoodSearchView: View {
                                 confirmingFood = food
                             } label: {
                                 HStack(spacing: 10) {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ForgeColors.tileBackground).frame(width: 32, height: 32)
+                                    FoodMonogram(name: food.name).frame(width: 32, height: 32)
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack(spacing: 4) {
                                             Text(food.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)

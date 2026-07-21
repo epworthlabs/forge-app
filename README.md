@@ -131,6 +131,14 @@ All five: `swift test` (43/43) + `xcodebuild` BUILD SUCCEEDED + fresh install/la
 
 `swift test` (43/43) + `xcodebuild` BUILD SUCCEEDED + fresh install/launch confirmed clean.
 
+**Round nine — Progress/Eat polish + complete program templates (2026-07-21)** (FRG-328–330):
+
+- **FRG-328 workout calendar reverted to non-collapsible**: explicit follow-up — "don't make the workout calendar collapsable, keep it fixed." It's back to always-visible (Lift Progression stays the only collapsible section on the tab, per the immediately preceding request).
+- **FRG-329 food row monogram**: the icon slot next to every food row (search results, logged meal entries) was an empty flat-color box — no image ever loaded into it, since none of USDA/Open Food Facts/FatSecret return one. Replaced with a letter-monogram avatar, matching the pattern already used for the profile row in You. New shared `FoodMonogram`.
+- **FRG-330 complete program templates**: the 3 curated templates looked unfinished because they were — 5/3/1 was literally one lift per day, PPL and Upper/Lower had 3 exercises where a real version of either runs 5-6. Rebuilt as 4 templates aimed at different classes of gym-goer: **Beginner Full-Body** (new — 2-day A/B rotation, the app's day-rotation-on-Finish-Workout naturally turns that into a 3x/week A-B-A / B-A-B pattern), **Push/Pull/Legs — Hypertrophy** (bodybuilding-style volume, isolation work added), **5/3/1 for Strength** (Boring-But-Big-style assistance work behind each main lift — real 5/3/1 isn't one set of 5 and done), **Upper/Lower — General Fitness** (balanced 4-day intermediate split). Every exercise name re-verified against the bundled 873-exercise dataset via script before writing, same discipline as the original 3.
+
+`swift test` (43/43) + `xcodebuild` BUILD SUCCEEDED + fresh install/launch confirmed clean.
+
 **Not started:** the program editor doesn't expose deload scheduling in its UI yet (only the curated 5/3/1 template has `deloadEveryNWeeks` set, via direct construction). See `../engineering-backlog.html`.
 
 **Also needed before shipping, not before building:**

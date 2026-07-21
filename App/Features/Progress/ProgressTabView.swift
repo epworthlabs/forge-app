@@ -7,7 +7,6 @@ struct ProgressTabView: View {
     @EnvironmentObject var store: AppStore
     @State private var loggingWeight = false
     @State private var targetHitDays: Int?
-    @State private var trainingHistoryExpanded = false
     @State private var liftProgressionExpanded = true
 
     var body: some View {
@@ -81,16 +80,12 @@ struct ProgressTabView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
-                    // Feature request — calendar of training days. Collapsed by default: denser,
-                    // less-glanceable data than the rest of the tab, so it stays out of the way
-                    // until asked for.
-                    DisclosureGroup("Workout Calendar", isExpanded: $trainingHistoryExpanded) {
+                    // Feature request — "don't make the workout calendar collapsable, keep it
+                    // fixed." Always visible, unlike Lift Progression above.
+                    GlassCard {
                         WorkoutCalendarView(sessionDates: store.trailingSessions.map(\.date))
-                            .padding(.top, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .font(ForgeType.label)
-                    .foregroundStyle(ForgeColors.inkMuted)
-                    .tint(ForgeColors.ink)
                 }
                 .padding(20)
                 .padding(.bottom, 90)

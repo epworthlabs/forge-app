@@ -107,6 +107,23 @@ struct LiquidMacroRow: View {
     }
 }
 
+/// Feature request — "the icon on the left when we add a food item, can we remove that?" That
+/// spot was an empty flat-color box (no actual image ever loaded into it — none of the three food
+/// sources return one). A letter monogram fills the same space with something real to look at,
+/// same idea as the initials-style avatar already used for the profile row in You.
+struct FoodMonogram: View {
+    let name: String
+
+    var body: some View {
+        Circle()
+            .fill(ForgeColors.accent.opacity(0.16))
+            .overlay(
+                Text(name.trimmingCharacters(in: .whitespaces).first.map { String($0).uppercased() } ?? "?")
+                    .font(ForgeType.caption).fontWeight(.bold).foregroundStyle(ForgeColors.accent)
+            )
+    }
+}
+
 /// A frosted tile-style button with a dashed border — "add/log something" affordances across the
 /// app (Today's quick actions, Train/program editor's "+ Add" buttons, ProgramSelectionView's
 /// "New Program" tile all converge on this same shape).

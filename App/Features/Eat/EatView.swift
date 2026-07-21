@@ -66,7 +66,7 @@ struct EatView: View {
                             if !isCollapsed {
                                 ForEach(entries) { entry in
                                     HStack(spacing: 10) {
-                                        RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ForgeColors.tileBackground).frame(width: 30, height: 30)
+                                        FoodMonogram(name: entry.name).frame(width: 30, height: 30)
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(entry.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                                             Text("\(entry.proteinG)g P · \(entry.carbG)g C · \(entry.fatG)g F")

@@ -36,53 +36,121 @@ extension Sex {
 
 @MainActor
 final class OnboardingViewModel: ObservableObject {
-    // Exercise names below are verified exact matches against the bundled free-exercise-db
-    // dataset (873 exercises) — not guessed, since a typo here would silently produce an empty
-    // ExerciseSlot (ExerciseLibrary.search returning no match).
+    // Feature request — "the templated programs don't look complete... research 3-4 templates
+    // that cater to different classes of gym goers." Previous templates had 1-3 exercises per
+    // day (5/3/1 was a single lift, period) — realistic programs for each of these training
+    // styles run 4-6. Four distinct classes: a true beginner just starting out, a
+    // hypertrophy/bodybuilding-style lifter, a strength/powerlifting-style lifter, and a
+    // general-fitness intermediate. Exercise names below are verified exact matches against the
+    // bundled free-exercise-db dataset (873 exercises) via a script, not guessed — a typo here
+    // would silently produce an empty ExerciseSlot (ExerciseLibrary.search returning no match).
     static let templates: [ProgramTemplate] = [
-        ProgramTemplate(id: "ppl", name: "Push/Pull/Legs — Strength", weekCount: 12, defaultDays: [
+        // Beginner: a 2-day full-body split alternates A/B every session (the app rotates
+        // through `defaultDays` on each Finish Workout), which is what lets "3x/week" actually
+        // work out to A-B-A one week, B-A-B the next — standard beginner-program structure.
+        ProgramTemplate(id: "beginner-fb", name: "Beginner Full-Body", weekCount: 8, defaultDays: [
+            ProgramDay(name: "Full Body A", exercises: [
+                ProgramExercise(exerciseName: "Barbell Squat", targetSets: 3, targetReps: 5, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 3, targetReps: 5, targetWeightKg: 30),
+                ProgramExercise(exerciseName: "Bent Over Barbell Row", targetSets: 3, targetReps: 8, targetWeightKg: 30),
+                ProgramExercise(exerciseName: "Standing Military Press", targetSets: 2, targetReps: 8, targetWeightKg: 20),
+                ProgramExercise(exerciseName: "Cable Crunch", targetSets: 2, targetReps: 12, targetWeightKg: 15),
+            ]),
+            ProgramDay(name: "Full Body B", exercises: [
+                ProgramExercise(exerciseName: "Barbell Deadlift", targetSets: 1, targetReps: 5, targetWeightKg: 50),
+                ProgramExercise(exerciseName: "Barbell Incline Bench Press - Medium Grip", targetSets: 3, targetReps: 8, targetWeightKg: 25),
+                ProgramExercise(exerciseName: "Chin-Up", targetSets: 3, targetReps: 6, targetWeightKg: 0),
+                ProgramExercise(exerciseName: "Dumbbell Shoulder Press", targetSets: 3, targetReps: 8, targetWeightKg: 12),
+                ProgramExercise(exerciseName: "Barbell Curl", targetSets: 2, targetReps: 10, targetWeightKg: 15),
+            ]),
+        ]),
+        // Hypertrophy / bodybuilding style — higher volume, isolation work alongside compounds.
+        ProgramTemplate(id: "ppl", name: "Push/Pull/Legs — Hypertrophy", weekCount: 12, defaultDays: [
             ProgramDay(name: "Push", exercises: [
-                ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 4, targetReps: 6, targetWeightKg: 60),
-                ProgramExercise(exerciseName: "Standing Military Press", targetSets: 3, targetReps: 8, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 4, targetReps: 8, targetWeightKg: 55),
+                ProgramExercise(exerciseName: "Barbell Incline Bench Press - Medium Grip", targetSets: 3, targetReps: 10, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Standing Military Press", targetSets: 3, targetReps: 8, targetWeightKg: 35),
+                ProgramExercise(exerciseName: "Side Lateral Raise", targetSets: 3, targetReps: 15, targetWeightKg: 8),
                 ProgramExercise(exerciseName: "Triceps Pushdown", targetSets: 3, targetReps: 12, targetWeightKg: 25),
+                ProgramExercise(exerciseName: "Standing Overhead Barbell Triceps Extension", targetSets: 2, targetReps: 12, targetWeightKg: 15),
             ]),
             ProgramDay(name: "Pull", exercises: [
                 ProgramExercise(exerciseName: "Barbell Deadlift", targetSets: 3, targetReps: 5, targetWeightKg: 100),
-                ProgramExercise(exerciseName: "Bent Over Barbell Row", targetSets: 4, targetReps: 8, targetWeightKg: 60),
-                ProgramExercise(exerciseName: "Barbell Curl", targetSets: 3, targetReps: 10, targetWeightKg: 30),
+                ProgramExercise(exerciseName: "Bent Over Barbell Row", targetSets: 4, targetReps: 8, targetWeightKg: 55),
+                ProgramExercise(exerciseName: "Wide-Grip Lat Pulldown", targetSets: 3, targetReps: 10, targetWeightKg: 45),
+                ProgramExercise(exerciseName: "Face Pull", targetSets: 3, targetReps: 15, targetWeightKg: 15),
+                ProgramExercise(exerciseName: "Barbell Curl", targetSets: 3, targetReps: 10, targetWeightKg: 25),
+                ProgramExercise(exerciseName: "Hammer Curls", targetSets: 2, targetReps: 12, targetWeightKg: 10),
             ]),
             ProgramDay(name: "Legs", exercises: [
-                ProgramExercise(exerciseName: "Barbell Squat", targetSets: 4, targetReps: 8, targetWeightKg: 100),
-                ProgramExercise(exerciseName: "Romanian Deadlift", targetSets: 3, targetReps: 10, targetWeightKg: 80),
-                ProgramExercise(exerciseName: "Leg Press", targetSets: 3, targetReps: 12, targetWeightKg: 140),
+                ProgramExercise(exerciseName: "Barbell Squat", targetSets: 4, targetReps: 8, targetWeightKg: 90),
+                ProgramExercise(exerciseName: "Romanian Deadlift", targetSets: 3, targetReps: 10, targetWeightKg: 70),
+                ProgramExercise(exerciseName: "Leg Press", targetSets: 3, targetReps: 12, targetWeightKg: 120),
+                ProgramExercise(exerciseName: "Seated Leg Curl", targetSets: 3, targetReps: 12, targetWeightKg: 35),
+                ProgramExercise(exerciseName: "Standing Calf Raises", targetSets: 4, targetReps: 15, targetWeightKg: 50),
+                ProgramExercise(exerciseName: "Leg Extensions", targetSets: 2, targetReps: 15, targetWeightKg: 40),
             ]),
         ]),
-        ProgramTemplate(id: "531", name: "5/3/1 for Beginners", weekCount: 16, defaultDays: [
-            ProgramDay(name: "Squat Day", exercises: [ProgramExercise(exerciseName: "Barbell Squat", targetSets: 5, targetReps: 5, targetWeightKg: 80)]),
-            ProgramDay(name: "Bench Day", exercises: [ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 5, targetReps: 5, targetWeightKg: 60)]),
-            ProgramDay(name: "Deadlift Day", exercises: [ProgramExercise(exerciseName: "Barbell Deadlift", targetSets: 5, targetReps: 5, targetWeightKg: 100)]),
-            ProgramDay(name: "Press Day", exercises: [ProgramExercise(exerciseName: "Standing Military Press", targetSets: 5, targetReps: 5, targetWeightKg: 40)]),
-        ], deloadEveryNWeeks: 4), // 5/3/1's classic structure: 3 weeks building intensity, 4th week deload
-        ProgramTemplate(id: "ul", name: "Upper/Lower Hypertrophy", weekCount: 10, defaultDays: [
+        // Strength / powerlifting style — Wendler 5/3/1's classic structure (main lift, low reps,
+        // 3 weeks building intensity, 4th week deload) plus "Boring But Big"-style assistance
+        // work, which real 5/3/1 programs actually include rather than just one lift per day.
+        ProgramTemplate(id: "531", name: "5/3/1 for Strength", weekCount: 16, defaultDays: [
+            ProgramDay(name: "Squat Day", exercises: [
+                ProgramExercise(exerciseName: "Barbell Squat", targetSets: 5, targetReps: 5, targetWeightKg: 80),
+                ProgramExercise(exerciseName: "Leg Press", targetSets: 5, targetReps: 10, targetWeightKg: 90),
+                ProgramExercise(exerciseName: "Seated Leg Curl", targetSets: 3, targetReps: 10, targetWeightKg: 30),
+                ProgramExercise(exerciseName: "Standing Calf Raises", targetSets: 3, targetReps: 15, targetWeightKg: 40),
+            ]),
+            ProgramDay(name: "Bench Day", exercises: [
+                ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 5, targetReps: 5, targetWeightKg: 60),
+                ProgramExercise(exerciseName: "Incline Dumbbell Press", targetSets: 5, targetReps: 10, targetWeightKg: 20),
+                ProgramExercise(exerciseName: "Triceps Pushdown", targetSets: 3, targetReps: 12, targetWeightKg: 20),
+                ProgramExercise(exerciseName: "Barbell Curl", targetSets: 3, targetReps: 10, targetWeightKg: 20),
+            ]),
+            ProgramDay(name: "Deadlift Day", exercises: [
+                ProgramExercise(exerciseName: "Barbell Deadlift", targetSets: 5, targetReps: 5, targetWeightKg: 100),
+                ProgramExercise(exerciseName: "Bent Over Barbell Row", targetSets: 5, targetReps: 10, targetWeightKg: 45),
+                ProgramExercise(exerciseName: "Good Morning", targetSets: 3, targetReps: 10, targetWeightKg: 30),
+                ProgramExercise(exerciseName: "Cable Crunch", targetSets: 3, targetReps: 15, targetWeightKg: 20),
+            ]),
+            ProgramDay(name: "Press Day", exercises: [
+                ProgramExercise(exerciseName: "Standing Military Press", targetSets: 5, targetReps: 5, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Seated Cable Rows", targetSets: 5, targetReps: 10, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Side Lateral Raise", targetSets: 3, targetReps: 15, targetWeightKg: 8),
+                ProgramExercise(exerciseName: "Standing Overhead Barbell Triceps Extension", targetSets: 3, targetReps: 12, targetWeightKg: 15),
+            ]),
+        ], deloadEveryNWeeks: 4),
+        // General fitness / intermediate — balanced upper/lower split, moderate volume.
+        ProgramTemplate(id: "ul", name: "Upper/Lower — General Fitness", weekCount: 10, defaultDays: [
             ProgramDay(name: "Upper A", exercises: [
                 ProgramExercise(exerciseName: "Barbell Bench Press - Medium Grip", targetSets: 4, targetReps: 10, targetWeightKg: 55),
                 ProgramExercise(exerciseName: "Bent Over Barbell Row", targetSets: 4, targetReps: 10, targetWeightKg: 55),
                 ProgramExercise(exerciseName: "Standing Military Press", targetSets: 3, targetReps: 12, targetWeightKg: 35),
+                ProgramExercise(exerciseName: "Wide-Grip Lat Pulldown", targetSets: 3, targetReps: 12, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Barbell Curl", targetSets: 2, targetReps: 12, targetWeightKg: 20),
+                ProgramExercise(exerciseName: "Triceps Pushdown", targetSets: 2, targetReps: 12, targetWeightKg: 20),
             ]),
             ProgramDay(name: "Lower A", exercises: [
                 ProgramExercise(exerciseName: "Barbell Squat", targetSets: 4, targetReps: 10, targetWeightKg: 90),
                 ProgramExercise(exerciseName: "Romanian Deadlift", targetSets: 3, targetReps: 12, targetWeightKg: 70),
+                ProgramExercise(exerciseName: "Leg Press", targetSets: 3, targetReps: 12, targetWeightKg: 110),
                 ProgramExercise(exerciseName: "Standing Calf Raises", targetSets: 3, targetReps: 15, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Cable Crunch", targetSets: 2, targetReps: 15, targetWeightKg: 15),
             ]),
             ProgramDay(name: "Upper B", exercises: [
                 ProgramExercise(exerciseName: "Barbell Incline Bench Press - Medium Grip", targetSets: 4, targetReps: 10, targetWeightKg: 45),
                 ProgramExercise(exerciseName: "Chin-Up", targetSets: 4, targetReps: 8, targetWeightKg: 0),
                 ProgramExercise(exerciseName: "Dumbbell Shoulder Press", targetSets: 3, targetReps: 12, targetWeightKg: 20),
+                ProgramExercise(exerciseName: "Seated Cable Rows", targetSets: 3, targetReps: 12, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Hammer Curls", targetSets: 2, targetReps: 12, targetWeightKg: 10),
+                ProgramExercise(exerciseName: "Standing Overhead Barbell Triceps Extension", targetSets: 2, targetReps: 12, targetWeightKg: 15),
             ]),
             ProgramDay(name: "Lower B", exercises: [
                 ProgramExercise(exerciseName: "Front Squat (Clean Grip)", targetSets: 4, targetReps: 10, targetWeightKg: 60),
                 ProgramExercise(exerciseName: "Seated Leg Curl", targetSets: 3, targetReps: 12, targetWeightKg: 40),
                 ProgramExercise(exerciseName: "Leg Press", targetSets: 3, targetReps: 15, targetWeightKg: 120),
+                ProgramExercise(exerciseName: "Standing Calf Raises", targetSets: 3, targetReps: 15, targetWeightKg: 40),
+                ProgramExercise(exerciseName: "Cable Crunch", targetSets: 2, targetReps: 15, targetWeightKg: 15),
             ]),
         ]),
     ]
