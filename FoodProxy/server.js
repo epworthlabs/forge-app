@@ -1,9 +1,12 @@
 import express from "express";
 
 const PORT = process.env.PORT || 3000;
-const CLIENT_ID = process.env.FATSECRET_CLIENT_ID;
-const CLIENT_SECRET = process.env.FATSECRET_CLIENT_SECRET;
-const APP_SHARED_SECRET = process.env.APP_SHARED_SECRET;
+// .trim() defensively — a leading space pasted into Render's env var UI once silently broke the
+// Base64 Basic-Auth header sent to FatSecret (invalid_client), and wasn't visible in the
+// dashboard. Not a hypothetical: this is exactly what happened.
+const CLIENT_ID = process.env.FATSECRET_CLIENT_ID?.trim();
+const CLIENT_SECRET = process.env.FATSECRET_CLIENT_SECRET?.trim();
+const APP_SHARED_SECRET = process.env.APP_SHARED_SECRET?.trim();
 
 if (!CLIENT_ID || !CLIENT_SECRET || !APP_SHARED_SECRET) {
   console.error(
@@ -48,35 +51,6 @@ async function getAccessToken() {
 const app = express();
 
 app.get("/health", (req, res) => res.status(200).send("ok"));
-
-// Temporary diagnostic — reports this host's actual current outbound IP, to verify it really
-// falls inside whatever range is allowlisted in FatSecret's dashboard rather than assuming
-// Render's published range is accurate/current. Remove once the FatSecret auth issue is resolved.
-app.get("/whereami", async (req, res) => {
-  try {
-    const ipResponse = await fetch("https://api.ipify.org?format=json");
-    const data = await ipResponse.json();
-    res.json(data);
-  } catch (err) {
-    res.status(502).json({ error: String(err) });
-  }
-});
-
-// Temporary — reports only lengths/char-codes at the edges, never the actual secret values, to
-// check for invisible whitespace/newlines in the Render env vars that wouldn't show in the
-// dashboard UI but would silently break the Base64 Basic-Auth header.
-app.get("/envcheck", (req, res) => {
-  const describe = (value) => ({
-    length: value.length,
-    firstCharCode: value.charCodeAt(0),
-    lastCharCode: value.charCodeAt(value.length - 1),
-    trimmedLength: value.trim().length,
-  });
-  res.json({
-    clientId: describe(CLIENT_ID),
-    clientSecret: describe(CLIENT_SECRET),
-  });
-});
 
 app.get("/search", async (req, res) => {
   if (req.header("X-App-Secret") !== APP_SHARED_SECRET) {
