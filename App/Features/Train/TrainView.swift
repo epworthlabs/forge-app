@@ -111,7 +111,7 @@ private struct ExerciseCard: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(slot.exercise.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                        Text("\(slot.targetSets)×\(slot.targetReps) @ \(Int(slot.targetWeightKg)) kg")
+                        Text("\(slot.targetSets)×\(slot.targetReps) @ \(WeightUnit.roundedLb(fromKg: slot.targetWeightKg)) lb")
                             .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                     }
                     Spacer()
@@ -176,7 +176,7 @@ private struct SuggestionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("SUGGESTED NEXT SET").font(ForgeType.label).foregroundStyle(ForgeColors.accent)
-            Text("\(Int(suggestion.weightKg)) kg × \(suggestion.reps)").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+            Text("\(WeightUnit.roundedLb(fromKg: suggestion.weightKg)) lb × \(suggestion.reps)").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
             HStack(spacing: 8) {
                 Button("Accept", action: onAccept)
                     .font(ForgeType.caption).foregroundStyle(Color.white)
@@ -211,7 +211,7 @@ private struct SetRow: View {
                         .strokeBorder(set.done ? ForgeColors.accent : ForgeColors.inkMuted, lineWidth: 1.5)
                         .background(Circle().fill(set.done ? ForgeColors.accent : Color.clear))
                         .frame(width: 16, height: 16)
-                    Text("\(Int(set.weightKg)) kg × \(set.reps)")
+                    Text("\(WeightUnit.roundedLb(fromKg: set.weightKg)) lb × \(set.reps)")
                         .font(ForgeType.body)
                         .foregroundStyle(set.done ? ForgeColors.ink : ForgeColors.inkMuted)
                     Spacer()
@@ -248,10 +248,10 @@ private struct EditableSetRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Stepper(value: Binding(
-                get: { set.weightKg },
-                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: $0, reps: set.reps) }
-            ), in: 0...500, step: 2.5) {
-                Text("\(Int(set.weightKg)) kg").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                get: { WeightUnit.lb(fromKg: set.weightKg) },
+                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: WeightUnit.kg(fromLb: $0), reps: set.reps) }
+            ), in: 0...1100, step: 5) {
+                Text("\(WeightUnit.roundedLb(fromKg: set.weightKg)) lb").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
             }
             Stepper(value: Binding(
                 get: { set.reps },

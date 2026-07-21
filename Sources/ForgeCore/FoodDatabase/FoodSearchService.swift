@@ -37,7 +37,44 @@ public actor FoodSearchService {
         var combined = off + usda + fs
         var seen = Set<String>()
         combined = combined.filter { seen.insert("\($0.name.lowercased())|\($0.brand?.lowercased() ?? "")").inserted }
-        return combined
+
+        // Re-rank so a plain search like "chicken breast" surfaces the generic, non-branded
+        // nutrition entry first — branded products only outrank it when the query itself names
+        // that brand (e.g. "quest bar"). Source order above is just the merge/dedup priority;
+        // this is the actual display order.
+        let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespaces)
+        let indexed = combined.enumerated().map { (offset: $0.offset, result: $0.element) }
+        let ranked = indexed.sorted { lhs, rhs in
+            let lScore = Self.rankScore(for: lhs.result, query: normalizedQuery)
+            let rScore = Self.rankScore(for: rhs.result, query: normalizedQuery)
+            if lScore != rScore { return lScore > rScore }
+            return lhs.offset < rhs.offset
+        }
+        return ranked.map(\.result)
+    }
+
+    private static func rankScore(for result: FoodSearchResult, query: String) -> Int {
+        var score = 0
+        let name = result.name.lowercased()
+        let brand = result.brand?.lowercased()
+
+        if let brand, !brand.isEmpty, query.contains(brand) || brand.contains(query) {
+            // The user searched for this specific brand — that's the whole point of the query.
+            score += 200
+        } else if brand == nil || brand!.isEmpty {
+            // Generic, non-branded nutrition — the "regular chicken breast" case.
+            score += 100
+        }
+
+        if name == query {
+            score += 50
+        } else if name.hasPrefix(query) {
+            score += 20
+        } else if name.contains(query) {
+            score += 5
+        }
+
+        return score
     }
 
     /// Barcode lookup chain: Open Food Facts → FatSecret → nil (caller shows "not found, add

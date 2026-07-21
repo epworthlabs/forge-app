@@ -266,7 +266,7 @@ final class AppStore: ObservableObject {
         for i in todaysExercises.indices {
             guard let last = mostRecentSet(for: todaysExercises[i].exercise.name) else { continue }
             let rpeText = last.rpe.map { " @ RPE \(Int($0))" } ?? ""
-            todaysExercises[i].lastPerformance = "\(Int(last.weightKg)) kg × \(last.reps)\(rpeText)"
+            todaysExercises[i].lastPerformance = "\(WeightUnit.roundedLb(fromKg: last.weightKg)) lb × \(last.reps)\(rpeText)"
         }
     }
 
@@ -311,7 +311,7 @@ final class AppStore: ObservableObject {
     }
 
     func addExercise(_ exercise: Exercise, targetSets: Int = 3, targetReps: Int = 8) {
-        let seedWeight = mostRecentSet(for: exercise.name)?.weightKg ?? 20
+        let seedWeight = mostRecentSet(for: exercise.name)?.weightKg ?? WeightUnit.kg(fromLb: 45)
         let slot = ExerciseSlot(exercise: exercise, targetSets: targetSets, targetReps: targetReps, targetWeightKg: seedWeight,
                                  lastPerformance: nil, sets: (0..<targetSets).map { _ in LoggedSet(weightKg: seedWeight, reps: targetReps) })
         todaysExercises.append(slot)
@@ -375,7 +375,7 @@ final class AppStore: ObservableObject {
     func addSet(exerciseID: ExerciseSlot.ID) {
         guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         let last = todaysExercises[exIdx].sets.last
-        todaysExercises[exIdx].sets.append(LoggedSet(weightKg: last?.weightKg ?? 20, reps: last?.reps ?? 8))
+        todaysExercises[exIdx].sets.append(LoggedSet(weightKg: last?.weightKg ?? WeightUnit.kg(fromLb: 45), reps: last?.reps ?? 8))
     }
 
     // FRG-222 — replaces a hardcoded "5/7 days" placeholder. Reconstructs each of the last 7

@@ -1,11 +1,13 @@
 import SwiftUI
 import Charts
 import PostHog
+import ForgeCore
 
 struct ProgressTabView: View {
     @EnvironmentObject var store: AppStore
     @State private var loggingWeight = false
     @State private var targetHitDays: Int?
+    @State private var trainingHistoryExpanded = false
 
     var body: some View {
         ZStack {
@@ -69,12 +71,26 @@ struct ProgressTabView: View {
                         Text("Finish a workout to start tracking PRs").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                     } else {
                         ForEach(records.prefix(5), id: \.exercise) { pr in
-                            Text("\(pr.exercise): \(Int(pr.weightKg))kg × \(pr.reps)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            Text("\(pr.exercise): \(WeightUnit.roundedLb(fromKg: pr.weightKg)) lb × \(pr.reps)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 6)
                                 .overlay(Rectangle().fill(ForgeColors.cardBorder).frame(height: 1), alignment: .bottom)
                         }
                     }
+
+                    // Feature request — calendar of training days + a StrongLifts-style per-lift
+                    // progression chart. Collapsed by default: this is denser, less-glanceable data
+                    // than the rest of the tab, so it stays out of the way until asked for.
+                    DisclosureGroup("Training History", isExpanded: $trainingHistoryExpanded) {
+                        VStack(alignment: .leading, spacing: 18) {
+                            WorkoutCalendarView(sessionDates: store.trailingSessions.map(\.date))
+                            LiftProgressionView(sessions: store.trailingSessions)
+                        }
+                        .padding(.top, 12)
+                    }
+                    .font(ForgeType.label)
+                    .foregroundStyle(ForgeColors.inkMuted)
+                    .tint(ForgeColors.ink)
                 }
                 .padding(20)
                 .padding(.bottom, 90)
@@ -127,5 +143,154 @@ private struct LogWeightSheet: View {
         .padding(22)
         .presentationDetents([.height(220)])
         .onAppear { weightLb = store.bodyweightLogLb.last?.weightLb ?? 150 }
+    }
+}
+
+/// Feature request — a month at a glance, marking the days a workout was completed. `sessionDates`
+/// comes straight from `trailingSessions`; days are matched by calendar day, not exact timestamp.
+private struct WorkoutCalendarView: View {
+    let sessionDates: [Date]
+    @State private var displayedMonth = Date()
+
+    private let calendar = Calendar.current
+    private let columns = Array(repeating: GridItem(.flexible()), count: 7)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("WORKOUT DAYS").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                Spacer()
+                Button { shiftMonth(by: -1) } label: {
+                    Image(systemName: "chevron.left").font(.caption).foregroundStyle(ForgeColors.inkMuted)
+                }
+                Text(monthTitle).font(ForgeType.caption).foregroundStyle(ForgeColors.ink).frame(minWidth: 90)
+                Button { shiftMonth(by: 1) } label: {
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(ForgeColors.inkMuted)
+                }
+            }
+            .buttonStyle(.plain)
+
+            LazyVGrid(columns: columns, spacing: 6) {
+                ForEach(weekdaySymbols, id: \.self) { symbol in
+                    Text(symbol).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        .frame(maxWidth: .infinity)
+                }
+                ForEach(Array(daysGrid.enumerated()), id: \.offset) { _, day in
+                    if let day {
+                        let trained = trainedDayNumbers.contains(calendar.component(.day, from: day))
+                        Text("\(calendar.component(.day, from: day))")
+                            .font(ForgeType.caption)
+                            .foregroundStyle(trained ? Color.white : ForgeColors.inkMuted)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 26)
+                            .background(trained ? ForgeColors.accent : Color.clear)
+                            .clipShape(Circle())
+                    } else {
+                        Color.clear.frame(height: 26)
+                    }
+                }
+            }
+        }
+    }
+
+    private var monthTitle: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: displayedMonth)
+    }
+
+    private var weekdaySymbols: [String] { calendar.veryShortWeekdaySymbols }
+
+    /// Every `sessionDates` day-of-month that falls within `displayedMonth`'s year+month —
+    /// intentionally not full `Date` equality, since a calendar cell only knows the day number.
+    private var trainedDayNumbers: Set<Int> {
+        let targetMonth = calendar.component(.month, from: displayedMonth)
+        let targetYear = calendar.component(.year, from: displayedMonth)
+        return Set(sessionDates.compactMap { date -> Int? in
+            let comps = calendar.dateComponents([.year, .month, .day], from: date)
+            guard comps.year == targetYear, comps.month == targetMonth else { return nil }
+            return comps.day
+        })
+    }
+
+    private var daysGrid: [Date?] {
+        guard let monthInterval = calendar.dateInterval(of: .month, for: displayedMonth),
+              let firstWeekday = calendar.dateComponents([.weekday], from: monthInterval.start).weekday else { return [] }
+        let leadingBlanks = (firstWeekday - calendar.firstWeekday + 7) % 7
+        let dayCount = calendar.range(of: .day, in: .month, for: displayedMonth)?.count ?? 30
+        var cells: [Date?] = Array(repeating: nil, count: leadingBlanks)
+        cells += (0..<dayCount).map { calendar.date(byAdding: .day, value: $0, to: monthInterval.start) }
+        return cells
+    }
+
+    private func shiftMonth(by offset: Int) {
+        if let newMonth = calendar.date(byAdding: .month, value: offset, to: displayedMonth) {
+            displayedMonth = newMonth
+        }
+    }
+}
+
+/// Feature request — StrongLifts-style progression: pick a lift, see the heaviest working set for
+/// it across every logged session. Uses the heaviest set per session (not the average) since
+/// that's the number that actually defines progressive overload for that day.
+private struct LiftProgressionView: View {
+    let sessions: [WorkoutSession]
+    @State private var selectedExercise: String?
+
+    private var exerciseNames: [String] {
+        Array(Set(sessions.flatMap { $0.sets.map(\.exerciseName) }.filter { !$0.isEmpty })).sorted()
+    }
+
+    private var dataPoints: [(date: Date, weightLb: Double)] {
+        guard let selectedExercise else { return [] }
+        return sessions.compactMap { session -> (Date, Double)? in
+            let matches = session.sets.filter { $0.exerciseName == selectedExercise }
+            guard let top = matches.max(by: { $0.weightKg < $1.weightKg }) else { return nil }
+            return (session.date, WeightUnit.lb(fromKg: top.weightKg))
+        }
+        .sorted { $0.0 < $1.0 }
+        .map { (date: $0.0, weightLb: $0.1) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("LIFT PROGRESSION").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+
+            if exerciseNames.isEmpty {
+                Text("Finish a workout to see lift progression").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            } else {
+                Menu {
+                    ForEach(exerciseNames, id: \.self) { name in
+                        Button(name) { selectedExercise = name }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(selectedExercise ?? "Select a lift").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                        Image(systemName: "chevron.down").font(.caption2).foregroundStyle(ForgeColors.inkMuted)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(ForgeColors.tileBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .onAppear { if selectedExercise == nil { selectedExercise = exerciseNames.first } }
+
+                if dataPoints.count < 2 {
+                    Text("Log this lift a couple more times to see a trend")
+                        .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        .frame(height: 120, alignment: .center)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Chart(dataPoints, id: \.date) { point in
+                        LineMark(x: .value("Date", point.date), y: .value("Weight", point.weightLb))
+                            .foregroundStyle(ForgeColors.accent)
+                        PointMark(x: .value("Date", point.date), y: .value("Weight", point.weightLb))
+                            .foregroundStyle(ForgeColors.accent)
+                    }
+                    .frame(height: 140)
+                    .chartXAxis(.hidden)
+                }
+            }
+        }
     }
 }

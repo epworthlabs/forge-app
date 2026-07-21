@@ -154,7 +154,7 @@ struct ProgramEditorView: View {
                 ExercisePickerSheet { exercise in
                     guard let dayID = pickingExerciseForDayID,
                           let idx = currentDaysBinding.wrappedValue.firstIndex(where: { $0.id == dayID }) else { return }
-                    currentDaysBinding.wrappedValue[idx].exercises.append(ProgramExercise(exerciseName: exercise.name, targetSets: 3, targetReps: 8, targetWeightKg: 20))
+                    currentDaysBinding.wrappedValue[idx].exercises.append(ProgramExercise(exerciseName: exercise.name, targetSets: 3, targetReps: 8, targetWeightKg: WeightUnit.kg(fromLb: 45)))
                 }
             }
         }
@@ -241,7 +241,10 @@ private struct ExerciseRowEditor: View {
                     .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             }
             HStack(spacing: 14) {
-                Stepper("Weight: \(Int(exercise.targetWeightKg)) kg", value: $exercise.targetWeightKg, in: 0...300, step: 2.5)
+                Stepper("Weight: \(WeightUnit.roundedLb(fromKg: exercise.targetWeightKg)) lb", value: Binding(
+                    get: { WeightUnit.lb(fromKg: exercise.targetWeightKg) },
+                    set: { exercise.targetWeightKg = WeightUnit.kg(fromLb: $0) }
+                ), in: 0...600, step: 5)
                     .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             }
         }

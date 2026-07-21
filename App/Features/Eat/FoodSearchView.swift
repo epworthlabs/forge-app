@@ -135,13 +135,43 @@ struct FoodSearchView: View {
     }
 }
 
+/// Feature request — quantity typed freely in whichever unit the user has on hand (grams, ounces,
+/// or a plain serving count), rather than locked to 0.25x steps of the reported serving size.
+/// Grams/ounces only appear as options when `referenceGrams` can actually be parsed from the
+/// food's serving description — without that there's nothing to scale a gram entry against, so
+/// the sheet falls back to servings-only (still freely typed, just not a fixed step).
 private struct PortionConfirmSheet: View {
     @Environment(\.dismiss) private var dismiss
     let food: FoodSearchResult
     let meal: Meal
     var onConfirm: (FoodSearchResult) -> Void
 
-    @State private var multiplier: Double = 1.0
+    private enum PortionUnit: String, CaseIterable { case g = "g", oz = "oz", servings = "servings" }
+
+    private let referenceGrams: Double?
+    @State private var unit: PortionUnit
+    @State private var quantityText: String
+
+    init(food: FoodSearchResult, meal: Meal, onConfirm: @escaping (FoodSearchResult) -> Void) {
+        self.food = food
+        self.meal = meal
+        self.onConfirm = onConfirm
+        let grams = food.referenceGrams
+        referenceGrams = grams
+        _unit = State(initialValue: grams != nil ? .g : .servings)
+        _quantityText = State(initialValue: grams != nil ? Self.trimmedDecimal(grams!) : "1")
+    }
+
+    private var availableUnits: [PortionUnit] { referenceGrams != nil ? [.g, .oz, .servings] : [.servings] }
+
+    private var multiplier: Double {
+        guard let quantity = Double(quantityText), quantity >= 0 else { return 0 }
+        switch unit {
+        case .g: return referenceGrams.map { quantity / $0 } ?? 0
+        case .oz: return referenceGrams.map { (quantity * 28.3495) / $0 } ?? 0
+        case .servings: return quantity
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -154,25 +184,23 @@ private struct PortionConfirmSheet: View {
                 }
             }
 
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Portion").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                    Text(food.servingDescription).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                }
-                Spacer()
-                Button { multiplier = max(0.25, multiplier - 0.25) } label: {
-                    Image(systemName: "minus").font(.system(size: 14, weight: .bold))
-                        .frame(width: 34, height: 34).foregroundStyle(ForgeColors.ink)
-                        .background(ForgeColors.tileBackground).clipShape(Circle())
-                }
-                Text("\(trimmedDecimal(multiplier))×").font(ForgeType.title).foregroundStyle(ForgeColors.ink).frame(width: 54)
-                Button { multiplier += 0.25 } label: {
-                    Image(systemName: "plus").font(.system(size: 14, weight: .bold))
-                        .frame(width: 34, height: 34).foregroundStyle(ForgeColors.ink)
-                        .background(ForgeColors.tileBackground).clipShape(Circle())
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Reported as \(food.servingDescription)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                HStack(spacing: 10) {
+                    TextField("Amount", text: $quantityText)
+                        .keyboardType(.decimalPad)
+                        .font(ForgeType.title)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .frame(width: 90)
+                        .background(ForgeColors.tileBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Picker("Unit", selection: $unit) {
+                        ForEach(availableUnits, id: \.self) { u in Text(u.rawValue).tag(u) }
+                    }
+                    .pickerStyle(.segmented)
                 }
             }
-            .buttonStyle(.plain)
 
             HStack(spacing: 10) {
                 PortionMacroTile(label: "kcal", value: "\(scaledKcal)")
@@ -189,9 +217,11 @@ private struct PortionConfirmSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(.plain)
+            .disabled(multiplier <= 0)
+            .opacity(multiplier <= 0 ? 0.5 : 1)
         }
         .padding(22)
-        .presentationDetents([.height(360)])
+        .presentationDetents([.height(400)])
     }
 
     private var scaledKcal: Int { Int((Double(food.kcal) * multiplier).rounded()) }
@@ -199,16 +229,23 @@ private struct PortionConfirmSheet: View {
     private var scaledCarb: Double { food.carbG * multiplier }
     private var scaledFat: Double { food.fatG * multiplier }
 
+    private var quantityLabel: String {
+        switch unit {
+        case .g, .oz: return "\(quantityText) \(unit.rawValue)"
+        case .servings: return "\(Self.trimmedDecimal(multiplier))× \(food.servingDescription)"
+        }
+    }
+
     private func scaled(_ food: FoodSearchResult, by multiplier: Double) -> FoodSearchResult {
         FoodSearchResult(
             id: food.id, name: food.name, brand: food.brand,
             kcal: scaledKcal, proteinG: scaledProtein, carbG: scaledCarb, fatG: scaledFat,
-            servingDescription: multiplier == 1.0 ? food.servingDescription : "\(trimmedDecimal(multiplier))× \(food.servingDescription)",
+            servingDescription: quantityLabel,
             source: food.source, barcodeUPC: food.barcodeUPC
         )
     }
 
-    private func trimmedDecimal(_ value: Double) -> String {
+    private static func trimmedDecimal(_ value: Double) -> String {
         var text = String(format: "%.2f", value)
         while text.hasSuffix("0") { text.removeLast() }
         if text.hasSuffix(".") { text.removeLast() }
