@@ -5,6 +5,7 @@ struct TrainView: View {
     @EnvironmentObject var store: AppStore
     @State private var addingExercise = false
     @State private var editingProgram = false
+    @State private var showFutureWeeksPromptForAdd = false
 
     var body: some View {
         ZStack {
@@ -83,6 +84,7 @@ struct TrainView: View {
         .sheet(isPresented: $addingExercise) {
             ExercisePickerSheet { exercise in
                 store.addExercise(exercise)
+                showFutureWeeksPromptForAdd = true
             }
         }
         .sheet(isPresented: $editingProgram) {
@@ -90,11 +92,27 @@ struct TrainView: View {
                 store.updateProgram(updatedProgram)
             }
         }
+        .futureWeeksPrompt(isPresented: $showFutureWeeksPromptForAdd, store: store)
     }
 
     private var restLabel: String {
         let m = store.restSecondsRemaining / 60, s = store.restSecondsRemaining % 60
         return String(format: "%d:%02d", m, s)
+    }
+}
+
+/// Feature request — "allow them to change it for future weeks if needed." Session-only edits
+/// (swap/add/remove exercise, or finishing a sets/reps/weight edit) default to today only, same
+/// as before; this is the opt-in prompt to also promote the change into the program itself.
+private extension View {
+    func futureWeeksPrompt(isPresented: Binding<Bool>, store: AppStore) -> some View {
+        confirmationDialog(
+            "Also update your program for this week and beyond?",
+            isPresented: isPresented, titleVisibility: .visible
+        ) {
+            Button("This week & beyond") { store.applyTodaysChangesToFutureWeeks() }
+            Button("Just this session", role: .cancel) {}
+        }
     }
 }
 
@@ -104,6 +122,7 @@ private struct ExerciseCard: View {
     @State private var suggestionDismissed = false
     @State private var editingSets = false
     @State private var swappingExercise = false
+    @State private var showFutureWeeksPrompt = false
 
     var body: some View {
         GlassCard {
@@ -117,8 +136,13 @@ private struct ExerciseCard: View {
                     Spacer()
                     Menu {
                         Button("Swap Exercise") { swappingExercise = true }
-                        Button(editingSets ? "Done Editing" : "Edit Sets") { editingSets.toggle() }
-                        Button("Remove Exercise", role: .destructive) { store.removeExercise(exerciseID: slot.id) }
+                        if !editingSets {
+                            Button("Edit Sets") { editingSets = true }
+                        }
+                        Button("Remove Exercise", role: .destructive) {
+                            store.removeExercise(exerciseID: slot.id)
+                            showFutureWeeksPrompt = true
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle").foregroundStyle(ForgeColors.inkMuted).font(.body)
                     }
@@ -149,6 +173,21 @@ private struct ExerciseCard: View {
                     }
                 }
 
+                if editingSets {
+                    // Feature request — a dedicated, visible confirm action rather than only the
+                    // toggle buried in the ⋯ menu; also the point at which we ask whether these
+                    // set/rep/weight edits should carry forward into the program itself.
+                    Button {
+                        editingSets = false
+                        showFutureWeeksPrompt = true
+                    } label: {
+                        Text("Done Editing").font(ForgeType.body).frame(maxWidth: .infinity)
+                            .padding(12).foregroundStyle(Color.white).background(ForgeColors.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 Button {
                     store.addSet(exerciseID: slot.id)
                 } label: {
@@ -163,8 +202,10 @@ private struct ExerciseCard: View {
         .sheet(isPresented: $swappingExercise) {
             ExercisePickerSheet { exercise in
                 store.swapExercise(exerciseID: slot.id, with: exercise)
+                showFutureWeeksPrompt = true
             }
         }
+        .futureWeeksPrompt(isPresented: $showFutureWeeksPrompt, store: store)
     }
 }
 

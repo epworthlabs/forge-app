@@ -6,6 +6,7 @@ struct YouView: View {
     @AppStorage("forceDarkMode") private var forceDarkMode = false
     @AppStorage("remindersEnabled") private var remindersEnabled = false
     @AppStorage("healthSyncEnabled") private var healthSyncEnabled = false
+    @State private var showingMethodology = false
 
     var body: some View {
         ZStack {
@@ -78,6 +79,14 @@ struct YouView: View {
                             }
                             Divider().overlay(ForgeColors.cardBorder)
 
+                            // Feature request — "documentation on the you tab explaining how
+                            // everything is calculated."
+                            Button { showingMethodology = true } label: {
+                                SettingsRow(title: "How your numbers are calculated")
+                            }
+                            .buttonStyle(.plain)
+                            Divider().overlay(ForgeColors.cardBorder)
+
                             ShareLink(items: CSVExporter.exportFiles(store: store)) {
                                 HStack {
                                     Text("Export data (CSV)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
@@ -102,6 +111,7 @@ struct YouView: View {
             }
         }
         .preferredColorScheme(forceDarkMode ? .dark : nil)
+        .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than
             // only right after the toggle flips.

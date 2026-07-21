@@ -113,13 +113,21 @@ final class AppStore: ObservableObject {
         guard !days.isEmpty else { return [] }
         let day = days[dayIndex % days.count]
         return day.exercises.compactMap { programExercise -> ExerciseSlot? in
-            guard let exercise = ExerciseLibrary.search(programExercise.exerciseName).first(where: { $0.name == programExercise.exerciseName }) else { return nil }
+            guard let exercise = resolveExercise(named: programExercise.exerciseName) else { return nil }
             return ExerciseSlot(
                 exercise: exercise, targetSets: programExercise.targetSets, targetReps: programExercise.targetReps,
                 targetWeightKg: programExercise.targetWeightKg, lastPerformance: nil,
                 sets: (0..<programExercise.targetSets).map { _ in LoggedSet(weightKg: programExercise.targetWeightKg, reps: programExercise.targetReps) }
             )
         }
+    }
+
+    // Feature request — a custom exercise (added via ExercisePickerSheet, stored in
+    // CustomExerciseStore) won't be in the bundled ExerciseLibrary, so program rebuilds need to
+    // check both places by name or a swapped-in custom exercise would silently vanish from the
+    // day next time todaysExercises gets rebuilt (init, Finish Workout, program edit).
+    private static func resolveExercise(named name: String) -> Exercise? {
+        ExerciseLibrary.search(name).first(where: { $0.name == name }) ?? CustomExerciseStore.shared.exercise(named: name)
     }
 
     var currentProgramDayName: String {
@@ -287,6 +295,33 @@ final class AppStore: ObservableObject {
         }
     }
 
+    // Feature request — "allow them to change it for future weeks if needed." Promotes today's
+    // (possibly session-edited) exercise list into the program itself, replacing just today's day
+    // slot for the current week and every week after it — past weeks are left alone since they
+    // already happened. Reuses `updateProgram` so this goes through the same persistence path and
+    // `todaysExercises` rebuild as any other durable program edit.
+    func applyTodaysChangesToFutureWeeks() {
+        let newDay = ProgramDay(
+            name: currentProgramDayName,
+            exercises: todaysExercises.map {
+                ProgramExercise(exerciseName: $0.exercise.name, targetSets: $0.targetSets, targetReps: $0.targetReps, targetWeightKg: $0.targetWeightKg)
+            }
+        )
+        var newProgram = program
+        let startWeek = min(currentProgramWeek, newProgram.weekCount)
+        for week in startWeek...newProgram.weekCount {
+            var days = newProgram.days(forWeek: week)
+            guard currentProgramDayIndex < days.count else { continue }
+            days[currentProgramDayIndex] = newDay
+            if week == 1 {
+                newProgram.defaultDays = days
+            } else {
+                newProgram.weekOverrides[week] = days
+            }
+        }
+        updateProgram(newProgram)
+    }
+
     // Feature request — session-only editing of today's workout: swap/add/remove exercises,
     // remove sets, edit weight/reps directly. Deliberately doesn't touch `program` at all — this
     // is a one-off substitution ("gym doesn't have this machine today"), not a change to what the
@@ -351,10 +386,6 @@ final class AppStore: ObservableObject {
     func refreshReminders() {
         let workoutDone = todaysExercises.contains { $0.sets.contains { $0.done } }
         ReminderManager.shared.scheduleEveningReminders(workoutDone: workoutDone, mealsLoggedToday: !allFoodEntriesToday().isEmpty)
-    }
-
-    func lookupBarcode(_ code: String) async -> FoodSearchResult? {
-        await foodSearchService.lookupBarcode(code)
     }
 
     func toggleSet(exerciseID: ExerciseSlot.ID, setID: LoggedSet.ID) {

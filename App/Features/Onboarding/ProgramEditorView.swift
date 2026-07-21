@@ -257,10 +257,14 @@ private struct ExerciseRowEditor: View {
 /// Reused by Train's swap/add-exercise flow too, not just this editor.
 struct ExercisePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var customExercises = CustomExerciseStore.shared
     var onSelect: (Exercise) -> Void
     @State private var query = ""
+    @State private var addingCustomExercise = false
 
-    private var results: [Exercise] { Array(ExerciseLibrary.search(query).prefix(40)) }
+    // Custom exercises first — if a user bothered to add one, it's probably what they're after
+    // right now, and there won't be many of them next to the bundled 873.
+    private var results: [Exercise] { Array((customExercises.search(query) + ExerciseLibrary.search(query)).prefix(40)) }
 
     var body: some View {
         NavigationStack {
@@ -272,6 +276,15 @@ struct ExercisePickerSheet: View {
                             .padding(10)
                             .background(.ultraThinMaterial)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        // Feature request — "users won't be able to find certain exercises."
+                        // Always available, not just when a search comes up empty: a specific gym
+                        // machine or variation might share a name with something already in the
+                        // library.
+                        Button { addingCustomExercise = true } label: {
+                            Text("Can't find it? + Add your own").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                        }
+                        .buttonStyle(.plain)
 
                         ForEach(results) { exercise in
                             Button {
@@ -298,6 +311,61 @@ struct ExercisePickerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
+            .sheet(isPresented: $addingCustomExercise) {
+                AddCustomExerciseSheet(startingName: query) { exercise in
+                    onSelect(exercise)
+                    dismiss()
+                }
+            }
         }
+    }
+}
+
+private struct AddCustomExerciseSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var startingName: String
+    var onAdd: (Exercise) -> Void
+
+    @State private var name: String
+    @State private var equipment: String = ""
+
+    init(startingName: String, onAdd: @escaping (Exercise) -> Void) {
+        self.startingName = startingName
+        self.onAdd = onAdd
+        _name = State(initialValue: startingName)
+    }
+
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Capsule().fill(ForgeColors.cardBorder).frame(width: 36, height: 4).frame(maxWidth: .infinity)
+            Text("Add your own exercise").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Name").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                TextField("e.g. Hack Squat Machine", text: $name)
+                    .padding(10).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Equipment (optional)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                TextField("e.g. Machine", text: $equipment)
+                    .padding(10).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+
+            Button {
+                let exercise = CustomExerciseStore.shared.add(name: trimmedName, equipment: equipment)
+                onAdd(exercise)
+            } label: {
+                Text("Add Exercise").font(ForgeType.title).frame(maxWidth: .infinity)
+                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(trimmedName.isEmpty)
+            .opacity(trimmedName.isEmpty ? 0.5 : 1)
+        }
+        .padding(22)
+        .presentationDetents([.height(320)])
     }
 }

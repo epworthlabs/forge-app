@@ -9,8 +9,6 @@ struct FoodSearchView: View {
     @State private var query = ""
     @State private var results: [FoodSearchResult] = []
     @State private var isSearching = false
-    @State private var scannerPresented = false
-    @State private var notFoundBarcode: String?
     @State private var confirmingFood: FoodSearchResult?
 
     var body: some View {
@@ -19,27 +17,11 @@ struct FoodSearchView: View {
                 ForgeColors.backgroundBase.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 8) {
-                            TextField("Search or scan…", text: $query)
-                                .font(ForgeType.body)
-                                .padding(10)
-                                .background(.ultraThinMaterial)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            Button { scannerPresented = true } label: {
-                                Image(systemName: "barcode.viewfinder")
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(ForgeColors.ink)
-                                    .frame(width: 40, height: 40)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        if let notFoundBarcode {
-                            Text("No match for barcode \(notFoundBarcode) — try searching by name.")
-                                .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                        }
+                        TextField("Search…", text: $query)
+                            .font(ForgeType.body)
+                            .padding(10)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                         if query.isEmpty && !store.recentFoods.isEmpty {
                             Text("RECENT & FREQUENT").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
@@ -114,17 +96,6 @@ struct FoodSearchView: View {
             isSearching = true
             results = await store.foodSearchService.search(query: query)
             isSearching = false
-        }
-        .sheet(isPresented: $scannerPresented) {
-            BarcodeScannerView { code in
-                Task {
-                    if let match = await store.lookupBarcode(code) {
-                        confirmingFood = match
-                    } else {
-                        notFoundBarcode = code
-                    }
-                }
-            }
         }
         .sheet(item: $confirmingFood) { food in
             PortionConfirmSheet(food: food, meal: meal) { scaledFood in
