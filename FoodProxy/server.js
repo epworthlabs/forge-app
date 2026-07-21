@@ -62,6 +62,22 @@ app.get("/whereami", async (req, res) => {
   }
 });
 
+// Temporary — reports only lengths/char-codes at the edges, never the actual secret values, to
+// check for invisible whitespace/newlines in the Render env vars that wouldn't show in the
+// dashboard UI but would silently break the Base64 Basic-Auth header.
+app.get("/envcheck", (req, res) => {
+  const describe = (value) => ({
+    length: value.length,
+    firstCharCode: value.charCodeAt(0),
+    lastCharCode: value.charCodeAt(value.length - 1),
+    trimmedLength: value.trim().length,
+  });
+  res.json({
+    clientId: describe(CLIENT_ID),
+    clientSecret: describe(CLIENT_SECRET),
+  });
+});
+
 app.get("/search", async (req, res) => {
   if (req.header("X-App-Secret") !== APP_SHARED_SECRET) {
     return res.status(401).json({ error: "unauthorized" });
