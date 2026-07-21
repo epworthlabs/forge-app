@@ -43,23 +43,37 @@ public enum NutritionTargetEngine {
         let finalCalories = max(candidateCalories, redSFloor)
         let floorApplied = finalCalories > candidateCalories
 
-        // Protein is the fixed anchor (PRD Appendix step 4) and fat has a hard floor for hormonal
-        // health, so carbs are the one macro allowed to flex: give them the full researched g/kg
-        // band when the calorie budget allows it, but compress them — never protein, never below
-        // the fat floor — when it doesn't. Without this, protein + the full carb band can exceed
-        // the total target outright during a cut, and the three macros silently stop summing to it.
-        let proteinG = profile.weightKg * profile.goal.proteinPerKg
-        let proteinKcal = proteinG * 4
-        let fatFloorG = 0.55 * profile.weightKg
-        let fatFloorKcal = fatFloorG * 9
-        let desiredCarbKcal = profile.weightKg * carbBand(for: loadScore) * 4
+        let proteinG: Double
+        let carbG: Double
+        let fatG: Double
+        if let proteinPct = profile.manualProteinPercent, let carbPct = profile.manualCarbPercent, let fatPct = profile.manualFatPercent {
+            // Feature request — "adjust the target macro splits manually if needed." A percentage
+            // split of whatever the total is, so it still scales with the daily Load Score swing
+            // instead of pinning fixed gram targets against a calorie total that moves day to day.
+            proteinG = (finalCalories * proteinPct) / 4
+            carbG = (finalCalories * carbPct) / 4
+            fatG = (finalCalories * fatPct) / 9
+        } else {
+            // Protein is the fixed anchor (PRD Appendix step 4) and fat has a hard floor for
+            // hormonal health, so carbs are the one macro allowed to flex: give them the full
+            // researched g/kg band when the calorie budget allows it, but compress them — never
+            // protein, never below the fat floor — when it doesn't. Without this, protein + the
+            // full carb band can exceed the total target outright during a cut, and the three
+            // macros silently stop summing to it.
+            let defaultProteinG = profile.weightKg * profile.goal.proteinPerKg
+            let proteinKcal = defaultProteinG * 4
+            let fatFloorG = 0.55 * profile.weightKg
+            let fatFloorKcal = fatFloorG * 9
+            let desiredCarbKcal = profile.weightKg * carbBand(for: loadScore) * 4
 
-        let kcalAvailableForCarbs = max(0, finalCalories - proteinKcal - fatFloorKcal)
-        let carbKcal = min(desiredCarbKcal, kcalAvailableForCarbs)
-        let carbG = carbKcal / 4
+            let kcalAvailableForCarbs = max(0, finalCalories - proteinKcal - fatFloorKcal)
+            let carbKcal = min(desiredCarbKcal, kcalAvailableForCarbs)
 
-        let kcalRemainingForFat = finalCalories - proteinKcal - carbKcal
-        let fatG = max(fatFloorG, kcalRemainingForFat / 9)
+            let kcalRemainingForFat = finalCalories - proteinKcal - carbKcal
+            proteinG = defaultProteinG
+            carbG = carbKcal / 4
+            fatG = max(fatFloorG, kcalRemainingForFat / 9)
+        }
 
         return NutritionTarget(
             calories: finalCalories,

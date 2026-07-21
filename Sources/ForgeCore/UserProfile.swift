@@ -51,9 +51,20 @@ public struct UserProfile: Sendable, Codable {
     // figure stays fixed until the user explicitly changes goal/target/timeframe again.
     public var targetWeightKg: Double?
     public var targetWeeks: Int?
+    // Feature request — "protein intake seems a bit low, I want users to be able to adjust the
+    // target macro splits manually if needed." Percentages of calories (0-1), not fixed gram
+    // targets — a fixed-gram override would fight the daily Load Score swing, since the total
+    // calorie target moves day to day; a percentage split scales with whatever that total is and
+    // still respects the "connected engine" premise. All three set together or not at all (see
+    // NutritionTargetEngine.calculate); protein's g/kg default (1.7-2.4 depending on goal) stays
+    // the fallback when this is nil.
+    public var manualProteinPercent: Double?
+    public var manualCarbPercent: Double?
+    public var manualFatPercent: Double?
 
     public init(weightKg: Double, heightCm: Double, age: Int, sex: Sex, activityLevel: ActivityLevel, goal: Goal,
-                fatFreeMassKg: Double? = nil, targetWeightKg: Double? = nil, targetWeeks: Int? = nil) {
+                fatFreeMassKg: Double? = nil, targetWeightKg: Double? = nil, targetWeeks: Int? = nil,
+                manualProteinPercent: Double? = nil, manualCarbPercent: Double? = nil, manualFatPercent: Double? = nil) {
         self.weightKg = weightKg
         self.heightCm = heightCm
         self.age = age
@@ -63,6 +74,9 @@ public struct UserProfile: Sendable, Codable {
         self.fatFreeMassKg = fatFreeMassKg
         self.targetWeightKg = targetWeightKg
         self.targetWeeks = targetWeeks
+        self.manualProteinPercent = manualProteinPercent
+        self.manualCarbPercent = manualCarbPercent
+        self.manualFatPercent = manualFatPercent
     }
 
     /// Falls back to 80% of bodyweight when body composition isn't known.

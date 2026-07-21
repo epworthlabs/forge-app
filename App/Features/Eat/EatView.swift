@@ -47,9 +47,9 @@ struct EatView: View {
                                         if isCollapsed { collapsedMeals.remove(meal) } else { collapsedMeals.insert(meal) }
                                     }
                                 } label: {
-                                    HStack(spacing: 6) {
+                                    HStack(spacing: 8) {
                                         Image(systemName: "chevron.right")
-                                            .font(.caption).foregroundStyle(ForgeColors.inkMuted)
+                                            .font(.body).foregroundStyle(ForgeColors.inkMuted)
                                             .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                                         Text(meal.rawValue).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                                         if !entries.isEmpty {
@@ -57,11 +57,14 @@ struct EatView: View {
                                                 .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                                         }
                                     }
+                                    .frame(minHeight: 44)
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                                 Spacer()
                                 Button("+ Add") { searchingMeal = meal }
-                                    .font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                                    .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
+                                    .padding(.horizontal, 10).frame(minHeight: 44)
                             }
                             if !isCollapsed {
                                 ForEach(entries) { entry in

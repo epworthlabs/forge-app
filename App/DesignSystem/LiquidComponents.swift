@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// "Liquid Glass" — the design direction the style exploration converged on (see
 /// `../../../Wireframes/updated/uploads/Fitness and nutrition tracker app/`: TodayGlassLight.dc.html
@@ -107,6 +108,31 @@ struct LiquidMacroRow: View {
     }
 }
 
+/// Feature request — "give a default avatar... let users edit... upload a photo." Falls back to
+/// a plain SF Symbol silhouette when no photo has been picked, rather than an empty box.
+struct AvatarView: View {
+    let imageData: Data?
+    var size: CGFloat = 52
+
+    var body: some View {
+        Group {
+            if let imageData, let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    ForgeColors.accent
+                    Image(systemName: "person.fill")
+                        .resizable().scaledToFit()
+                        .foregroundStyle(.white)
+                        .padding(size * 0.22)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+}
+
 /// Feature request — "the icon on the left when we add a food item, can we remove that?" That
 /// spot was an empty flat-color box (no actual image ever loaded into it — none of the three food
 /// sources return one). A letter monogram fills the same space with something real to look at,
@@ -121,6 +147,79 @@ struct FoodMonogram: View {
                 Text(name.trimmingCharacters(in: .whitespaces).first.map { String($0).uppercased() } ?? "?")
                     .font(ForgeType.caption).fontWeight(.bold).foregroundStyle(ForgeColors.accent)
             )
+    }
+}
+
+/// Feature request — "when I input numbers with a numpad... limit the set and rep ranges to be 2
+/// digits max, weights... 3 digits max" + "if I first tap that field to edit and input a new
+/// number it should replace the existing numbers." Clears on focus (so the first keystroke starts
+/// a fresh number instead of appending to what was there) and clamps both digit count and value
+/// range as the user types. Generously padded — small tap targets were part of "hard to adjust
+/// weights... on such small input buttons."
+struct NumpadField: View {
+    @Binding var value: Int
+    var maxDigits: Int
+    var range: ClosedRange<Int>
+    var suffix: String?
+
+    @FocusState private var isFocused: Bool
+    @State private var text: String = ""
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TextField("", text: $text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.center)
+                .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                .focused($isFocused)
+                .frame(minWidth: 40)
+            if let suffix {
+                Text(suffix).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+        }
+        .frame(minHeight: 44)
+        .padding(.horizontal, 10)
+        .background(ForgeColors.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onAppear { text = String(value) }
+        .onChange(of: isFocused) { focused in
+            // Clearing on focus (rather than trying to detect "first keystroke" from the raw
+            // text delta) is what makes typing replace rather than append — SwiftUI's TextField
+            // doesn't expose text-selection control on iOS 16 without dropping to UIKit.
+            if focused {
+                text = ""
+            } else if text.isEmpty {
+                text = String(value)
+            }
+        }
+        .onChange(of: text) { newText in
+            var digits = newText.filter(\.isNumber)
+            if digits.count > maxDigits { digits = String(digits.prefix(maxDigits)) }
+            if digits != newText { text = digits }
+            guard let parsed = Int(digits) else { return }
+            value = min(range.upperBound, max(range.lowerBound, parsed))
+        }
+    }
+}
+
+/// Minimum-44pt-tap-target icon button — Apple's own HIG minimum, used for the small circular
+/// icon buttons (±, pencil, trash) that were "hard to adjust weights... on such small input
+/// buttons" at their old 26-30pt sizes.
+struct IconButton: View {
+    let systemName: String
+    let action: () -> Void
+    var size: CGFloat = 44
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(ForgeColors.ink)
+                .frame(width: size, height: size)
+                .background(ForgeColors.cardBackground)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

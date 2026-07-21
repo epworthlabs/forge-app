@@ -7,6 +7,32 @@ func makeProfile(goal: Goal = .maintain) -> UserProfile {
 }
 
 @Suite struct NutritionTargetEngineTests {
+    @Test func manualMacroSplitOverridesTheDefaultCalculation() {
+        var profile = makeProfile(goal: .maintain)
+        profile.manualProteinPercent = 0.40
+        profile.manualCarbPercent = 0.35
+        profile.manualFatPercent = 0.25
+
+        let target = NutritionTargetEngine.calculate(profile: profile, loadScore: 1.0)
+        let proteinKcal = target.proteinG * 4
+        let carbKcal = target.carbG * 4
+        let fatKcal = target.fatG * 9
+
+        #expect(abs(proteinKcal / target.calories - 0.40) < 0.01)
+        #expect(abs(carbKcal / target.calories - 0.35) < 0.01)
+        #expect(abs(fatKcal / target.calories - 0.25) < 0.01)
+    }
+
+    @Test func missingAnyOneManualMacroFallsBackToDefault() {
+        var profile = makeProfile(goal: .maintain)
+        profile.manualProteinPercent = 0.40
+        profile.manualCarbPercent = 0.35
+        // fat percent left nil — should fall back to the default computed split entirely.
+        let target = NutritionTargetEngine.calculate(profile: profile, loadScore: 1.0)
+        #expect(target.proteinG == profile.weightKg * profile.goal.proteinPerKg)
+    }
+
+
     @Test func proteinStaysStableAcrossLoadScores() {
         let profile = makeProfile()
         let light = NutritionTargetEngine.calculate(profile: profile, loadScore: 0.5)

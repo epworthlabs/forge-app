@@ -61,7 +61,12 @@ struct TrainSessionView: View {
     @State private var addingExercise = false
     @State private var editingProgram = false
     @State private var editingRestDuration = false
-    @State private var showFutureWeeksPromptForAdd = false
+    // Bug fix — this used to live on each ExerciseCard, which broke the prompt entirely: removing
+    // or swapping an exercise mutates `todaysExercises`, which tears down (remove) or recreates
+    // (swap — see AppStore.swapExercise's id-preservation fix) that specific card's view instance
+    // before its own confirmationDialog/alert ever got a chance to render. Living here instead,
+    // on the parent that's never destroyed by that mutation, is what actually makes it show up.
+    @State private var showFutureWeeksPrompt = false
 
     var body: some View {
         ZStack {
@@ -78,10 +83,10 @@ struct TrainSessionView: View {
                         // future weeks." Durable program edits, distinct from swap/add/remove in
                         // ExerciseCard below, which only affect today's session.
                         Button { editingProgram = true } label: {
-                            Text("Edit Program").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                            Text("Edit Program").font(ForgeType.body).foregroundStyle(ForgeColors.accent)
                         }
                         .buttonStyle(.plain)
-                        .padding(.top, 6)
+                        .padding(.top, 4)
                     }
 
                     // FRG-206 — a scheduled deload week, not a missed one; surfaced so a lighter
@@ -96,7 +101,7 @@ struct TrainSessionView: View {
                     RestTimerCard(editingRestDuration: $editingRestDuration)
 
                     ForEach(store.todaysExercises) { slot in
-                        ExerciseCard(slot: slot)
+                        ExerciseCard(slot: slot, onLineupChanged: { showFutureWeeksPrompt = true })
                     }
 
                     // Feature request — session-only: adds to today's workout, doesn't touch the
@@ -108,7 +113,7 @@ struct TrainSessionView: View {
                         onFinished()
                     } label: {
                         Text("Finish Workout").font(ForgeType.title).frame(maxWidth: .infinity)
-                            .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
+                            .padding(18).foregroundStyle(Color.white).background(ForgeColors.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -123,7 +128,7 @@ struct TrainSessionView: View {
         .sheet(isPresented: $addingExercise) {
             ExercisePickerSheet { exercise in
                 store.addExercise(exercise)
-                showFutureWeeksPromptForAdd = true
+                showFutureWeeksPrompt = true
             }
         }
         .sheet(isPresented: $editingProgram) {
@@ -136,7 +141,7 @@ struct TrainSessionView: View {
                 store.restDurationSeconds = newSeconds
             }
         }
-        .futureWeeksPrompt(isPresented: $showFutureWeeksPromptForAdd, store: store)
+        .futureWeeksAlert(isPresented: $showFutureWeeksPrompt, store: store)
     }
 }
 
@@ -159,13 +164,10 @@ private struct RestTimerCard: View {
                             .foregroundStyle(remaining < 0 ? Color.red : ForgeColors.ink)
                     }
                     Spacer()
-                    Button { editingRestDuration = true } label: {
-                        Image(systemName: "pencil").font(.caption).foregroundStyle(ForgeColors.inkMuted)
-                            .frame(width: 30, height: 30)
-                    }
-                    .buttonStyle(.plain)
+                    IconButton(systemName: "pencil", action: { editingRestDuration = true }, size: 40)
                     Button("Reset") { store.restEndDate = Date().addingTimeInterval(TimeInterval(store.restDurationSeconds)) }
                         .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
+                        .padding(.horizontal, 6)
                 }
             }
             .task(id: remaining) {
@@ -223,17 +225,15 @@ private struct RestDurationSheet: View {
     }
 }
 
-/// Feature request — "allow them to change it for future weeks if needed." Session-only edits
-/// (swap/add/remove exercise, or finishing a sets/reps/weight edit) default to today only, same
-/// as before; this is the opt-in prompt to also promote the change into the program itself.
+/// Feature request — "allow them to change it for future weeks if needed" + "change the prompt...
+/// to an actual window" (an `.alert`, not the bottom-sheet-style `.confirmationDialog` it was).
 private extension View {
-    func futureWeeksPrompt(isPresented: Binding<Bool>, store: AppStore) -> some View {
-        confirmationDialog(
-            "Also update your program for this week and beyond?",
-            isPresented: isPresented, titleVisibility: .visible
-        ) {
-            Button("This week & beyond") { store.applyTodaysChangesToFutureWeeks() }
-            Button("Just this session", role: .cancel) {}
+    func futureWeeksAlert(isPresented: Binding<Bool>, store: AppStore) -> some View {
+        alert("Update Your Program?", isPresented: isPresented) {
+            Button("This Week & Beyond") { store.applyTodaysChangesToFutureWeeks() }
+            Button("Just This Session", role: .cancel) {}
+        } message: {
+            Text("Apply this change to your program for this week and beyond, or keep it to just today's session?")
         }
     }
 }
@@ -241,10 +241,10 @@ private extension View {
 private struct ExerciseCard: View {
     @EnvironmentObject var store: AppStore
     let slot: ExerciseSlot
+    var onLineupChanged: () -> Void
     @State private var suggestionDismissed = false
     @State private var editingSets = false
     @State private var swappingExercise = false
-    @State private var showFutureWeeksPrompt = false
 
     var body: some View {
         GlassCard {
@@ -263,10 +263,11 @@ private struct ExerciseCard: View {
                         }
                         Button("Remove Exercise", role: .destructive) {
                             store.removeExercise(exerciseID: slot.id)
-                            showFutureWeeksPrompt = true
+                            onLineupChanged()
                         }
                     } label: {
-                        Image(systemName: "ellipsis.circle").foregroundStyle(ForgeColors.inkMuted).font(.body)
+                        Image(systemName: "ellipsis.circle").foregroundStyle(ForgeColors.inkMuted).font(.system(size: 20))
+                            .frame(width: 44, height: 44)
                     }
                 }
 
@@ -305,30 +306,22 @@ private struct ExerciseCard: View {
                         editingSets = false
                     } label: {
                         Text("Done Editing").font(ForgeType.body).frame(maxWidth: .infinity)
-                            .padding(12).foregroundStyle(Color.white).background(ForgeColors.accent)
+                            .padding(14).foregroundStyle(Color.white).background(ForgeColors.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
 
-                Button {
-                    store.addSet(exerciseID: slot.id)
-                } label: {
-                    Text("+ Add Set").font(ForgeType.caption).frame(maxWidth: .infinity)
-                        .padding(10).foregroundStyle(ForgeColors.inkMuted)
-                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(ForgeColors.cardBorder, style: StrokeStyle(dash: [4, 4])))
-                }
-                .buttonStyle(.plain)
+                DashedActionButton(title: "+ Add Set") { store.addSet(exerciseID: slot.id) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheet(isPresented: $swappingExercise) {
             ExercisePickerSheet { exercise in
                 store.swapExercise(exerciseID: slot.id, with: exercise)
-                showFutureWeeksPrompt = true
+                onLineupChanged()
             }
         }
-        .futureWeeksPrompt(isPresented: $showFutureWeeksPrompt, store: store)
     }
 }
 
@@ -341,19 +334,19 @@ private struct SuggestionCard: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("SUGGESTED NEXT SET").font(ForgeType.label).foregroundStyle(ForgeColors.accent)
             Text("\(WeightUnit.roundedLb(fromKg: suggestion.weightKg)) lb × \(suggestion.reps)").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Button("Accept", action: onAccept)
-                    .font(ForgeType.caption).foregroundStyle(Color.white)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .font(ForgeType.body).foregroundStyle(Color.white)
+                    .padding(.horizontal, 18).padding(.vertical, 10)
                     .background(ForgeColors.accent).clipShape(Capsule())
                 Button("Dismiss", action: onDismiss)
-                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .font(ForgeType.body).foregroundStyle(ForgeColors.inkMuted)
+                    .padding(.horizontal, 18).padding(.vertical, 10)
                     .overlay(Capsule().strokeBorder(ForgeColors.cardBorder))
             }
         }
         .buttonStyle(.plain)
-        .padding(10)
+        .padding(12)
         .background(ForgeColors.tileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(ForgeColors.accent.opacity(0.4)))
@@ -370,11 +363,11 @@ private struct SetRow: View {
             Button {
                 store.toggleSet(exerciseID: exerciseID, setID: set.id)
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     Circle()
-                        .strokeBorder(set.done ? ForgeColors.accent : ForgeColors.inkMuted, lineWidth: 1.5)
+                        .strokeBorder(set.done ? ForgeColors.accent : ForgeColors.inkMuted, lineWidth: 2)
                         .background(Circle().fill(set.done ? ForgeColors.accent : Color.clear))
-                        .frame(width: 16, height: 16)
+                        .frame(width: 24, height: 24)
                     Text("\(WeightUnit.roundedLb(fromKg: set.weightKg)) lb × \(set.reps)")
                         .font(ForgeType.body)
                         .foregroundStyle(set.done ? ForgeColors.ink : ForgeColors.inkMuted)
@@ -383,7 +376,8 @@ private struct SetRow: View {
                         Text("RPE \(String(format: "%.0f", rpe))").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                     }
                 }
-                .padding(9)
+                .padding(.vertical, 13).padding(.horizontal, 10)
+                .frame(minHeight: 44)
                 .background(set.done ? ForgeColors.tileBackground : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
@@ -412,65 +406,49 @@ private struct EditableSetRow: View {
     var body: some View {
         HStack(spacing: 10) {
             // Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb
-            // increments as well." Typed entry for getting to a specific number fast, plus the
-            // existing quick-adjust buttons for small in-set corrections.
+            // increments as well" + "limit... weights... to 3 digits max."
             WeightNumberField(weightLb: Binding(
                 get: { WeightUnit.lb(fromKg: set.weightKg) },
                 set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: WeightUnit.kg(fromLb: $0), reps: set.reps) }
             ))
-            Stepper(value: Binding(
-                get: { set.reps },
-                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
-            ), in: 1...50) {
-                Text("\(set.reps) reps").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+            // Feature request — "limit the set and rep ranges to be 2 digits max," same numpad
+            // treatment as weight rather than a Stepper-only control.
+            HStack(spacing: 6) {
+                IconButton(systemName: "minus", action: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: max(1, set.reps - 1)) }, size: 36)
+                NumpadField(value: Binding(
+                    get: { set.reps },
+                    set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
+                ), maxDigits: 2, range: 1...50)
+                Text("reps").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                IconButton(systemName: "plus", action: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: min(50, set.reps + 1)) }, size: 36)
             }
             if canRemove {
-                Button { store.removeSet(exerciseID: exerciseID, setID: set.id) } label: {
-                    Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
-                }
-                .buttonStyle(.plain)
+                IconButton(systemName: "trash", action: { store.removeSet(exerciseID: exerciseID, setID: set.id) }, size: 36)
             }
         }
-        .padding(9)
+        .padding(10)
         .background(ForgeColors.tileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
 /// Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb increments
-/// as well." A digit-filtered numeric-keypad TextField for typing an exact number directly,
-/// flanked by the existing quick-adjust buttons for small corrections mid-set.
+/// as well." A digit-filtered numeric-keypad field for typing an exact number directly, flanked
+/// by the existing quick-adjust buttons for small corrections mid-set.
 private struct WeightNumberField: View {
     @Binding var weightLb: Double
 
     var body: some View {
         HStack(spacing: 6) {
-            Button { weightLb = max(0, weightLb - 5) } label: {
-                Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 3) {
-                TextField("", text: Binding(
-                    get: { String(Int(weightLb.rounded())) },
-                    set: { newText in
-                        let digits = newText.filter(\.isNumber)
-                        weightLb = min(1100, max(0, Double(digits) ?? 0))
-                    }
-                ))
-                .keyboardType(.numberPad)
-                .multilineTextAlignment(.trailing)
-                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-                .frame(width: 34)
+            IconButton(systemName: "minus", action: { weightLb = max(0, weightLb - 5) }, size: 36)
+            HStack(spacing: 4) {
+                NumpadField(value: Binding(
+                    get: { Int(weightLb.rounded()) },
+                    set: { weightLb = Double($0) }
+                ), maxDigits: 3, range: 0...999)
                 Text("lb").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             }
-
-            Button { weightLb = min(1100, weightLb + 5) } label: {
-                Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
-            }
-            .buttonStyle(.plain)
+            IconButton(systemName: "plus", action: { weightLb = min(999, weightLb + 5) }, size: 36)
         }
     }
 }
@@ -479,14 +457,14 @@ private struct RPEPicker: View {
     let value: Double
     let onChange: (Double) -> Void
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             ForEach(1...10, id: \.self) { n in
                 Button {
                     onChange(Double(n))
                 } label: {
                     Text("\(n)")
                         .font(ForgeType.caption)
-                        .frame(width: 22, height: 22)
+                        .frame(width: 28, height: 28)
                         .foregroundStyle(Int(value) == n ? Color.white : ForgeColors.inkMuted)
                         .background(Int(value) == n ? ForgeColors.accent : ForgeColors.tileBackground)
                         .clipShape(Circle())

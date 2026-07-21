@@ -38,6 +38,10 @@ actor CloudKitStore {
         // (see TDEECalculator.goalAdjustedTDEE); additive fields, same as savedProgramsJSON above.
         record["targetWeightKg"] = profile.targetWeightKg
         record["targetWeeks"] = profile.targetWeeks
+        // Feature request — manual macro split override; additive fields, same as target weight/weeks above.
+        record["manualProteinPercent"] = profile.manualProteinPercent
+        record["manualCarbPercent"] = profile.manualCarbPercent
+        record["manualFatPercent"] = profile.manualFatPercent
         // Feature request — ProgramTemplate grew a sparse per-week override dictionary (for
         // "customize or copy to future weeks"), so it's encoded as one JSON blob rather than
         // exploded into individual fields — simpler and doesn't need a new CKRecord field every
@@ -66,7 +70,10 @@ actor CloudKitStore {
 
         let profile = UserProfile(weightKg: weightKg, heightCm: heightCm, age: age, sex: sex, activityLevel: activityLevel,
                                    goal: goal, fatFreeMassKg: record["fatFreeMassKg"] as? Double,
-                                   targetWeightKg: record["targetWeightKg"] as? Double, targetWeeks: record["targetWeeks"] as? Int)
+                                   targetWeightKg: record["targetWeightKg"] as? Double, targetWeeks: record["targetWeeks"] as? Int,
+                                   manualProteinPercent: record["manualProteinPercent"] as? Double,
+                                   manualCarbPercent: record["manualCarbPercent"] as? Double,
+                                   manualFatPercent: record["manualFatPercent"] as? Double)
         // Older records predate savedProgramsJSON entirely — default to a single-program library
         // rather than failing the whole fetch over one missing optional field.
         let savedPrograms: [ProgramTemplate]

@@ -83,8 +83,16 @@ final class AppStore: ObservableObject {
 
     @Published var mealEntries: [Meal: [FoodEntry]] = [.breakfast: [], .lunch: [], .dinner: [], .snacks: []]
     @Published var bodyweightLogLb: [(date: Date, weightLb: Double)]
-    @Published var workoutsCompletedThisWeek = 4
-    @Published var workoutsPlannedThisWeek = 5
+
+    // Feature request — "pull the workouts completed metric based on the active workout program
+    // user is participating in. If it's 3x a week and completed 1 of 3, that metric is 1/3."
+    // These were hardcoded placeholders (4 and 5, permanently) until now — `workoutsCompletedThisWeek`
+    // never actually reset week to week, it just incremented forever.
+    var workoutsPlannedThisWeek: Int { program.daysPerWeek }
+    var workoutsCompletedThisWeek: Int {
+        guard let weekInterval = Calendar.current.dateInterval(of: .weekOfYear, for: Date()) else { return 0 }
+        return trailingSessions.filter { weekInterval.contains($0.date) }.count
+    }
 
     @Published var sheetPresented = false
 
@@ -133,10 +141,15 @@ final class AppStore: ObservableObject {
         let day = days[dayIndex % days.count]
         return day.exercises.compactMap { programExercise -> ExerciseSlot? in
             guard let exercise = resolveExercise(named: programExercise.exerciseName) else { return nil }
+            // Feature request — "when weights are first listed by default... always defaulted to
+            // increments of 5." Safety net beyond just re-authoring the curated templates in round
+            // numbers: any program (custom-built, or a future template) gets clean defaults here
+            // regardless of what the stored value actually is.
+            let weight = WeightUnit.roundedToNearestFiveLb(fromKg: programExercise.targetWeightKg)
             return ExerciseSlot(
                 exercise: exercise, targetSets: programExercise.targetSets, targetReps: programExercise.targetReps,
-                targetWeightKg: programExercise.targetWeightKg, lastPerformance: nil,
-                sets: (0..<programExercise.targetSets).map { _ in LoggedSet(weightKg: programExercise.targetWeightKg, reps: programExercise.targetReps) }
+                targetWeightKg: weight, lastPerformance: nil,
+                sets: (0..<programExercise.targetSets).map { _ in LoggedSet(weightKg: weight, reps: programExercise.targetReps) }
             )
         }
     }
@@ -204,6 +217,16 @@ final class AppStore: ObservableObject {
         profile.goal = goal
         profile.targetWeightKg = hasWeightTarget ? targetWeightLb.map { $0 * 0.45359237 } : nil
         profile.targetWeeks = hasWeightTarget ? targetWeeks : nil
+        persistProfile()
+    }
+
+    // Feature request — "protein intake seems a bit low, I want users to be able to adjust the
+    // target macro splits manually if needed." Percentages, nil to go back to the computed
+    // default (goal-based protein g/kg + flexible carbs) — see NutritionTargetEngine.calculate.
+    func updateMacroSplit(proteinPercent: Double?, carbPercent: Double?, fatPercent: Double?) {
+        profile.manualProteinPercent = proteinPercent
+        profile.manualCarbPercent = carbPercent
+        profile.manualFatPercent = fatPercent
         persistProfile()
     }
 
@@ -300,7 +323,6 @@ final class AppStore: ObservableObject {
         trailingSessions.append(session)
         // Feature request — congratulatory screen + review, reads this.
         lastCompletedSession = session
-        workoutsCompletedThisWeek += 1
 
         // FRG-104 — advance to the next day in the current week's rotation and rebuild the
         // exercise list from it, rather than just resetting today's `done` flags in place. This
@@ -337,9 +359,18 @@ final class AppStore: ObservableObject {
 
     // FRG-113 — nil when there's no history for this exercise yet (nothing to base a suggestion
     // on); the caller decides how to present that (e.g. no suggestion card at all).
+    //
+    // Feature request — "increase by increments of 5 or 2.5lbs, depending on the exercise."
+    // Barbell lifts move in 5lb jumps (a 2.5lb plate per side); everything else (dumbbell,
+    // machine, cable, bodyweight-plus-load) gets the finer 2.5lb step, since that equipment
+    // typically doesn't offer 5lb jumps in the first place.
     func suggestion(for slot: ExerciseSlot) -> ProgressiveOverloadEngine.Suggestion? {
         guard let last = mostRecentSet(for: slot.exercise.name) else { return nil }
-        return ProgressiveOverloadEngine.suggestNextSet(lastWeightKg: last.weightKg, lastReps: last.reps, lastRPE: last.rpe, targetReps: slot.targetReps)
+        let incrementLb: Double = slot.exercise.equipment == "barbell" ? 5 : 2.5
+        return ProgressiveOverloadEngine.suggestNextSet(
+            lastWeightKg: last.weightKg, lastReps: last.reps, lastRPE: last.rpe, targetReps: slot.targetReps,
+            roundingIncrementKg: WeightUnit.kg(fromLb: incrementLb)
+        )
     }
 
     // Applies a suggestion to every not-yet-done set for this exercise — accepting the suggestion
@@ -413,15 +444,24 @@ final class AppStore: ObservableObject {
     // Keeps target sets/reps (the program's intent for this slot), but re-seeds weight from the
     // new exercise's own history if any exists — carrying over the old exercise's weight onto an
     // unrelated lift wouldn't mean anything.
+    //
+    // Bug fix — this used to replace the array element with a brand-new `ExerciseSlot(...)`
+    // value. `ExerciseSlot.id` is a fresh `UUID()` generated at init time, so that silently gave
+    // the swapped-in exercise a *different* identity than the one it replaced. `ForEach` in
+    // TrainView diffs by that id, so SwiftUI tore down the old ExerciseCard (and its @State) and
+    // mounted a brand new one in the same render pass — which is why the "apply to future weeks?"
+    // prompt set on the old view's state right before swapping never actually appeared. Mutating
+    // the existing slot's fields in place instead preserves `id`, so the same view instance lives
+    // on and the prompt (now owned by the parent anyway — see TrainSessionView) works correctly.
     func swapExercise(exerciseID: ExerciseSlot.ID, with newExercise: Exercise) {
         guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }) else { return }
         let targetSets = todaysExercises[exIdx].targetSets
         let targetReps = todaysExercises[exIdx].targetReps
         let seedWeight = mostRecentSet(for: newExercise.name)?.weightKg ?? todaysExercises[exIdx].targetWeightKg
-        todaysExercises[exIdx] = ExerciseSlot(
-            exercise: newExercise, targetSets: targetSets, targetReps: targetReps, targetWeightKg: seedWeight,
-            lastPerformance: nil, sets: (0..<targetSets).map { _ in LoggedSet(weightKg: seedWeight, reps: targetReps) }
-        )
+        todaysExercises[exIdx].exercise = newExercise
+        todaysExercises[exIdx].targetWeightKg = seedWeight
+        todaysExercises[exIdx].lastPerformance = nil
+        todaysExercises[exIdx].sets = (0..<targetSets).map { _ in LoggedSet(weightKg: seedWeight, reps: targetReps) }
         refreshLastPerformance()
     }
 
@@ -466,15 +506,25 @@ final class AppStore: ObservableObject {
         todaysExercises[exIdx].sets.append(LoggedSet(weightKg: last?.weightKg ?? WeightUnit.kg(fromLb: 45), reps: last?.reps ?? 8))
     }
 
-    // FRG-222 — replaces a hardcoded "5/7 days" placeholder. Reconstructs each of the last 7
-    // days' Load Score from sessions strictly before that day (so it reflects what the target
-    // actually would have been that day, not today's), then compares that day's logged nutrition
-    // total against it. Days with nothing logged are skipped — no data isn't the same as a miss.
-    // Approximates with today's profile/weekly-recalibration rather than a historical snapshot,
-    // since past profile states aren't persisted — a reasonable simplification for a weekly view.
-    func targetHitDaysThisWeek() async -> Int {
+    // Feature request — "replace target hit with a metric for nutrition that adds value and
+    // insight to how on track they are towards their specified goals." A binary hit/miss count
+    // (FRG-222's original "X/7 days") threw away exactly how far off a day was — this reports the
+    // actual average, both in raw calories and as a percentage of target, so "close but a bit
+    // under" and "way over" read differently instead of both just counting as a miss. Same
+    // reconstruction approach as before: each day's Load Score is rebuilt from sessions strictly
+    // before that day, and days with nothing logged are skipped (no data isn't the same as 0).
+    struct NutritionWeekSummary {
+        var daysLogged: Int
+        var avgCalories: Int
+        var avgTargetCalories: Int
+        var avgCaloriePercent: Int
+    }
+
+    func nutritionWeekSummary() async -> NutritionWeekSummary {
         let calendar = Calendar.current
-        var hitCount = 0
+        var daysLogged = 0
+        var calorieSum = 0
+        var targetSum = 0.0
         for dayOffset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: Date()) else { continue }
             let startOfDay = calendar.startOfDay(for: day)
@@ -489,9 +539,19 @@ final class AppStore: ObservableObject {
             let loadScore = LoadScoreCalculator.loadScore(today: daySession, trailingSessions: priorSessions, asOf: startOfDay)
             let target = NutritionTargetEngine.calculate(profile: profile, loadScore: loadScore)
 
-            if abs(Double(kcalConsumed) - target.calories) <= 0.1 * target.calories { hitCount += 1 }
+            daysLogged += 1
+            calorieSum += kcalConsumed
+            targetSum += target.calories
         }
-        return hitCount
+        guard daysLogged > 0 else { return NutritionWeekSummary(daysLogged: 0, avgCalories: 0, avgTargetCalories: 0, avgCaloriePercent: 0) }
+        let avgCalories = calorieSum / daysLogged
+        let avgTarget = targetSum / Double(daysLogged)
+        return NutritionWeekSummary(
+            daysLogged: daysLogged,
+            avgCalories: avgCalories,
+            avgTargetCalories: Int(avgTarget.rounded()),
+            avgCaloriePercent: avgTarget > 0 ? Int((Double(avgCalories) / avgTarget * 100).rounded()) : 0
+        )
     }
 
     // FRG-304 — refreshes both readouts from HealthKit; safe to call repeatedly (e.g. on

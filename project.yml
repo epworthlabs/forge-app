@@ -25,6 +25,12 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.epworthlabs.forge
+        # Feature request — "let's name the app: Trakt." Display name only — bundle identifier and
+        # the CloudKit container (iCloud.com.epworthlabs.forge, below) are both internal, invisible
+        # to users, and changing either would mean a brand-new CloudKit container + re-provisioning
+        # rather than a rename. PRODUCT_NAME drives Info.plist's CFBundleName; explicit
+        # CFBundleDisplayName below is belt-and-suspenders for whichever one a given context reads.
+        PRODUCT_NAME: Trakt
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
@@ -32,7 +38,7 @@ targets:
       path: App/Info.plist
       properties:
         UILaunchScreen: {}
-        NSCameraUsageDescription: "Used to scan a food barcode instead of typing it in."
+        CFBundleDisplayName: Trakt
         NSHealthShareUsageDescription: "Used to factor your steps and sleep into your daily targets."
     entitlements:
       path: App/Forge.entitlements
@@ -41,4 +47,3 @@ targets:
         com.apple.developer.icloud-container-identifiers: ["iCloud.com.epworthlabs.forge"]
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
-        com.apple.developer.applesignin: ["Default"]

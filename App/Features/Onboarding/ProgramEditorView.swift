@@ -59,7 +59,7 @@ struct ProgramEditorView: View {
                         HStack {
                             Text("Timeframe").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             Spacer()
-                            NumberField(value: Binding(
+                            NumpadField(value: Binding(
                                 get: { weekCount },
                                 set: { newCount in
                                     let clamped = max(1, newCount)
@@ -71,7 +71,7 @@ struct ProgramEditorView: View {
                                     weekCount = clamped
                                     if selectedWeek > clamped { selectedWeek = clamped }
                                 }
-                            ), range: 1...52, suffix: "wk")
+                            ), maxDigits: 2, range: 1...52, suffix: "wk")
                         }
                         .padding(12)
                         .background(.ultraThinMaterial)
@@ -192,10 +192,7 @@ struct DayEditor: View {
                     .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                 Spacer()
                 if let onDeleteDay {
-                    Button(action: onDeleteDay) {
-                        Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
-                    }
-                    .buttonStyle(.plain)
+                    IconButton(systemName: "trash", action: onDeleteDay, size: 40)
                 }
             }
 
@@ -225,68 +222,34 @@ private struct ExerciseRowEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(exercise.exerciseName).font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                Text(exercise.exerciseName).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                 Spacer()
-                Button(action: onDelete) {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(ForgeColors.inkMuted).font(.caption)
-                }
-                .buttonStyle(.plain)
+                IconButton(systemName: "xmark", action: onDelete, size: 36)
             }
             // Feature request — "allow users to edit the numbers numpad" — typed entry instead of
             // tapping a Stepper through every value, especially painful for reps/weight ranges.
             HStack {
                 Text("Sets").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                 Spacer()
-                NumberField(value: $exercise.targetSets, range: 1...10)
+                NumpadField(value: $exercise.targetSets, maxDigits: 2, range: 1...10)
             }
             HStack {
                 Text("Reps").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                 Spacer()
-                NumberField(value: $exercise.targetReps, range: 1...30)
+                NumpadField(value: $exercise.targetReps, maxDigits: 2, range: 1...30)
             }
             HStack {
                 Text("Weight").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                 Spacer()
-                NumberField(value: Binding(
+                NumpadField(value: Binding(
                     get: { WeightUnit.roundedLb(fromKg: exercise.targetWeightKg) },
                     set: { exercise.targetWeightKg = WeightUnit.kg(fromLb: Double($0)) }
-                ), range: 0...600, suffix: "lb")
+                ), maxDigits: 3, range: 0...999, suffix: "lb")
             }
         }
         .padding(10)
         .background(ForgeColors.tileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-}
-
-/// Feature request — numeric-keypad entry, filtering to digits only and clamping to `range` as
-/// the user types, rather than a Stepper's one-tap-at-a-time increments.
-private struct NumberField: View {
-    @Binding var value: Int
-    var range: ClosedRange<Int>
-    var suffix: String?
-
-    var body: some View {
-        HStack(spacing: 4) {
-            TextField("", text: Binding(
-                get: { String(value) },
-                set: { newText in
-                    let digits = newText.filter(\.isNumber)
-                    let parsed = Int(digits) ?? range.lowerBound
-                    value = min(range.upperBound, max(range.lowerBound, parsed))
-                }
-            ))
-            .keyboardType(.numberPad)
-            .multilineTextAlignment(.trailing)
-            .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-            .frame(width: 44)
-            if let suffix {
-                Text(suffix).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-            }
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(ForgeColors.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

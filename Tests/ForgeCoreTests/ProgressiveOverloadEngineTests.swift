@@ -24,6 +24,14 @@ import Testing
         #expect(suggestion.weightKg.truncatingRemainder(dividingBy: 2.5) == 0)
     }
 
+    @Test func customRoundingIncrementIsRespected() {
+        // 5lb in kg — a barbell-exercise suggestion should land on a clean 5lb multiple.
+        let fiveLbKg = 5 * 0.45359237
+        let suggestion = ProgressiveOverloadEngine.suggestNextSet(lastWeightKg: 100, lastReps: 8, lastRPE: 7, targetReps: 8, roundingIncrementKg: fiveLbKg)
+        let asLb = (suggestion.weightKg / 0.45359237).rounded()
+        #expect(asLb.truncatingRemainder(dividingBy: 5) == 0)
+    }
+
     @Test func missingRPEDefaultsToATypicalWorkingEffort() {
         // No RPE logged — should behave like RPE 8 (the same default the rest of the engine uses).
         let withDefault = ProgressiveOverloadEngine.suggestNextSet(lastWeightKg: 100, lastReps: 8, lastRPE: nil, targetReps: 8)

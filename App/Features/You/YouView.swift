@@ -3,12 +3,13 @@ import ForgeCore
 
 struct YouView: View {
     @EnvironmentObject var store: AppStore
+    @ObservedObject private var profileSettings = ProfileSettings.shared
     @AppStorage("forceDarkMode") private var forceDarkMode = false
     @AppStorage("remindersEnabled") private var remindersEnabled = false
     @AppStorage("healthSyncEnabled") private var healthSyncEnabled = false
     @State private var showingMethodology = false
     @State private var editingGoalTarget = false
-    @State private var showingSignOutConfirmation = false
+    @State private var editingProfile = false
 
     var body: some View {
         ZStack {
@@ -17,16 +18,23 @@ struct YouView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("You").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
 
-                    GlassCard {
-                        HStack(spacing: 14) {
-                            Circle().fill(ForgeColors.accent).frame(width: 52, height: 52)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Alex Rivera").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                                Text("\(store.profile.goal.displayLabel) · \(Int(store.profile.weightKg)) kg")
-                                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    // Feature request — "give a default avatar and assign a randomly generated
+                    // username at the top. Let users edit those two fields if they want."
+                    Button { editingProfile = true } label: {
+                        GlassCard {
+                            HStack(spacing: 14) {
+                                AvatarView(imageData: profileSettings.avatarImageData, size: 56)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(profileSettings.username).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                    Text("\(store.profile.goal.displayLabel) · \(WeightUnit.roundedLb(fromKg: store.profile.weightKg)) lb")
+                                        .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                }
+                                Spacer()
+                                Image(systemName: "pencil.circle.fill").font(.system(size: 22)).foregroundStyle(ForgeColors.inkMuted)
                             }
                         }
                     }
+                    .buttonStyle(.plain)
 
                     GlassCard {
                         VStack(spacing: 0) {
@@ -34,7 +42,7 @@ struct YouView: View {
                                 Text("Dark Mode").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             }
                             .tint(ForgeColors.accent)
-                            .padding(.vertical, 9)
+                            .padding(.vertical, 13)
                             Divider().overlay(ForgeColors.cardBorder)
 
                             // Feature request — "this figure should not change unless these
@@ -50,7 +58,7 @@ struct YouView: View {
                                 Text("Logging reminders").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             }
                             .tint(ForgeColors.accent)
-                            .padding(.vertical, 9)
+                            .padding(.vertical, 13)
                             .onChange(of: remindersEnabled) { enabled in
                                 if enabled {
                                     Task {
@@ -66,7 +74,7 @@ struct YouView: View {
                                 Text("Apple Health sync").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             }
                             .tint(ForgeColors.accent)
-                            .padding(.vertical, 9)
+                            .padding(.vertical, 13)
                             .onChange(of: healthSyncEnabled) { enabled in
                                 guard enabled else { return }
                                 Task {
@@ -83,7 +91,7 @@ struct YouView: View {
                                         Text(String(format: "%.1fh sleep", sleep)).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                                     }
                                 }
-                                .padding(.bottom, 6)
+                                .padding(.bottom, 8)
                             }
                             Divider().overlay(ForgeColors.cardBorder)
 
@@ -99,21 +107,11 @@ struct YouView: View {
                                 HStack {
                                     Text("Export data (CSV)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                                     Spacer()
-                                    Image(systemName: "square.and.arrow.up").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                                    Image(systemName: "square.and.arrow.up").foregroundStyle(ForgeColors.inkMuted).font(.body)
                                 }
-                                .padding(.vertical, 9)
+                                .padding(.vertical, 13)
                             }
                         }
-                    }
-
-                    // Feature request — the sign-in gate needs a way back out of it, both for
-                    // switching Apple IDs and for actually testing the sign-in screen again.
-                    GlassCard {
-                        Button { showingSignOutConfirmation = true } label: {
-                            Text("Sign Out").font(ForgeType.body).foregroundStyle(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
                     }
 
                     // FRG-122/FRG-121 — attribution both food-database sources require as a
@@ -123,18 +121,14 @@ struct YouView: View {
                     Text("Food data from USDA FoodData Central, Open Food Facts (ODbL), and FatSecret.")
                         .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                         .padding(.top, 4)
-}
+                }
                 .padding(20)
                 .padding(.bottom, 90)
             }
         }
-        .preferredColorScheme(forceDarkMode ? .dark : nil)
         .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
         .sheet(isPresented: $editingGoalTarget) { GoalTargetEditSheet() }
-        .confirmationDialog("Sign out of Forge?", isPresented: $showingSignOutConfirmation, titleVisibility: .visible) {
-            Button("Sign Out", role: .destructive) { AppleSignInManager.shared.signOut() }
-            Button("Cancel", role: .cancel) {}
-        }
+        .sheet(isPresented: $editingProfile) { ProfileEditSheet() }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than
             // only right after the toggle flips.
@@ -149,8 +143,9 @@ private struct SettingsRow: View {
         HStack {
             Text(title).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
             Spacer()
-            Image(systemName: "chevron.right").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+            Image(systemName: "chevron.right").foregroundStyle(ForgeColors.inkMuted).font(.body)
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, 13)
+        .frame(minHeight: 44)
     }
 }

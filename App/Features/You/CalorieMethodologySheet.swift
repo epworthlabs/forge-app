@@ -25,7 +25,7 @@ struct CalorieMethodologySheet: View {
                         )
                         MethodologySection(
                             step: "3", title: "Weekly trend recalibration",
-                            body: "Formulas are estimates — your real metabolism might run faster or slower than Mifflin-St Jeor predicts. Once you've logged 4+ weigh-ins over 14 days, Forge compares how fast you're actually gaining or losing against how fast your goal adjustment implies you should be, and nudges the baseline to close that gap. It won't kick in on noisy, short weigh-in histories, and each correction is dampened rather than applied all at once."
+                            body: "Formulas are estimates — your real metabolism might run faster or slower than Mifflin-St Jeor predicts. Once you've logged 4+ weigh-ins over 14 days, Trakt compares how fast you're actually gaining or losing against how fast your goal adjustment implies you should be, and nudges the baseline to close that gap. It won't kick in on noisy, short weigh-in histories, and each correction is dampened rather than applied all at once."
                         )
                         MethodologySection(
                             step: "4", title: "Today's Load Score",

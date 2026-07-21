@@ -6,7 +6,7 @@ import ForgeCore
 struct ProgressTabView: View {
     @EnvironmentObject var store: AppStore
     @State private var loggingWeight = false
-    @State private var targetHitDays: Int?
+    @State private var nutritionSummary: AppStore.NutritionWeekSummary?
     @State private var liftProgressionExpanded = true
 
     var body: some View {
@@ -52,12 +52,35 @@ struct ProgressTabView: View {
                                 Spacer()
                                 Text("\(store.workoutsCompletedThisWeek)/\(store.workoutsPlannedThisWeek)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                             }
-                            HStack {
-                                Text("Target hit").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                                Spacer()
-                                if let targetHitDays {
-                                    Text("\(targetHitDays)/7 days").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                            // Feature request — "replace target hit with a metric for nutrition
+                            // that adds value and insight to how on track they are." A binary
+                            // hit/miss count didn't say how close — this shows the actual average
+                            // vs target, both directions (over or under) read differently now.
+                            if let summary = nutritionSummary {
+                                if summary.daysLogged == 0 {
+                                    HStack {
+                                        Text("Nutrition").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                        Spacer()
+                                        Text("No days logged yet").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                    }
                                 } else {
+                                    HStack {
+                                        Text("Avg calories (\(summary.daysLogged)d logged)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                        Spacer()
+                                        Text("\(summary.avgCalories) / \(summary.avgTargetCalories) kcal").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                    }
+                                    HStack {
+                                        Text("On track").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                        Spacer()
+                                        Text(onTrackLabel(summary.avgCaloriePercent))
+                                            .font(ForgeType.body)
+                                            .foregroundStyle(onTrackColor(summary.avgCaloriePercent))
+                                    }
+                                }
+                            } else {
+                                HStack {
+                                    Text("Nutrition").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                    Spacer()
                                     ProgressView().controlSize(.mini)
                                 }
                             }
@@ -94,7 +117,19 @@ struct ProgressTabView: View {
         // Goal 05 (PRD): history-depth engagement signal for the free-first paywall decision.
         .onAppear { PostHogSDK.shared.capture("progress_viewed") }
         .sheet(isPresented: $loggingWeight) { LogWeightSheet() }
-        .task { targetHitDays = await store.targetHitDaysThisWeek() }
+        .task { nutritionSummary = await store.nutritionWeekSummary() }
+    }
+
+    private func onTrackLabel(_ percent: Int) -> String {
+        switch percent {
+        case ..<90: return "\(100 - percent)% under"
+        case 90...110: return "On target"
+        default: return "\(percent - 100)% over"
+        }
+    }
+
+    private func onTrackColor(_ percent: Int) -> Color {
+        (90...110).contains(percent) ? ForgeColors.accent2 : ForgeColors.ink
     }
 }
 
@@ -111,17 +146,17 @@ private struct LogWeightSheet: View {
             Text("Log weight").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
             HStack {
                 Button { weightLb -= 0.5 } label: {
-                    Image(systemName: "minus").font(.system(size: 16, weight: .bold))
-                        .frame(width: 38, height: 38).background(ForgeColors.tileBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Image(systemName: "minus").font(.system(size: 18, weight: .bold))
+                        .frame(width: 48, height: 48).background(ForgeColors.tileBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 Spacer()
                 Text(String(format: "%.1f lb", weightLb)).font(ForgeType.displayMedium).foregroundStyle(ForgeColors.ink)
                 Spacer()
                 Button { weightLb += 0.5 } label: {
-                    Image(systemName: "plus").font(.system(size: 16, weight: .bold))
-                        .frame(width: 38, height: 38).background(ForgeColors.tileBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    Image(systemName: "plus").font(.system(size: 18, weight: .bold))
+                        .frame(width: 48, height: 48).background(ForgeColors.tileBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
             .buttonStyle(.plain)
@@ -155,13 +190,9 @@ private struct WorkoutCalendarView: View {
             HStack {
                 Text("WORKOUT DAYS").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
                 Spacer()
-                Button { shiftMonth(by: -1) } label: {
-                    Image(systemName: "chevron.left").font(.caption).foregroundStyle(ForgeColors.inkMuted)
-                }
+                IconButton(systemName: "chevron.left", action: { shiftMonth(by: -1) }, size: 36)
                 Text(monthTitle).font(ForgeType.caption).foregroundStyle(ForgeColors.ink).frame(minWidth: 90)
-                Button { shiftMonth(by: 1) } label: {
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(ForgeColors.inkMuted)
-                }
+                IconButton(systemName: "chevron.right", action: { shiftMonth(by: 1) }, size: 36)
             }
             .buttonStyle(.plain)
 

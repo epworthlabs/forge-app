@@ -17,7 +17,7 @@ struct SignInView: View {
                 Image(systemName: "figure.strengthtraining.traditional")
                     .font(.system(size: 56)).foregroundStyle(ForgeColors.accent)
                 VStack(spacing: 8) {
-                    Text("Forge").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                    Text("Trakt").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
                     Text("Sign in to get started").font(ForgeType.body).foregroundStyle(ForgeColors.inkMuted)
                 }
                 Spacer()
