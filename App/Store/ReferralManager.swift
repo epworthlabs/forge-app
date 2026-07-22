@@ -32,11 +32,7 @@ final class ReferralManager: ObservableObject {
             myCode = generated
             UserDefaults.standard.set(generated, forKey: Self.codeKey)
         }
-        // TEMPORARY — "unlock lift progression for now so I can test it." Forces the gate open
-        // regardless of the persisted redemption flag. Revert this line (back to
-        // `UserDefaults.standard.bool(forKey: Self.unlockedKey)`) before real launch, or the
-        // referral wall never actually gates anything.
-        isUnlocked = true
+        isUnlocked = UserDefaults.standard.bool(forKey: Self.unlockedKey)
     }
 
     var shareMessage: String {
