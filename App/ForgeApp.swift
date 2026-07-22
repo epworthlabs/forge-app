@@ -71,7 +71,16 @@ struct RootView: View {
             await signIn.refreshSignInState()
             isRefreshingSignIn = false
         }
-        .task {
+        // Bug fix — this used to be an unconditional `.task` that fired at launch in parallel
+        // with the Sign in with Apple check above, not waiting on it. On a fresh reinstall, that
+        // race could resolve (fail or return nil) *before* the user finished signing in, which
+        // permanently decided "show onboarding" — CloudKit never got a real chance once the user
+        // had actually authenticated. `.task(id:)` re-runs whenever `signIn.isSignedIn` changes,
+        // so the fetch only ever happens once sign-in is confirmed, and happens again right after
+        // a fresh sign-in on a reinstalled app rather than relying on a stale earlier attempt.
+        .task(id: signIn.isSignedIn) {
+            guard signIn.isSignedIn else { return }
+            isLoadingProfile = true
             // FRG-130/131 — a returning user with a saved CloudKit profile skips onboarding
             // entirely; a brand-new user (or one without CloudKit access yet) sees it as before.
             if let (profile, program, savedPrograms, dayIndex, programStartDate) = try? await CloudKitStore.shared.fetchProfile() {

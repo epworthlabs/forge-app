@@ -20,8 +20,12 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Used to factor your steps and sleep into your daily targets.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Trakt does not write any data to Health.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

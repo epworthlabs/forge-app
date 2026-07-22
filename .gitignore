@@ -6,3 +6,4 @@ DerivedData/
 .index-build/
 xcuserdata/
 App/Config/Secrets.swift
+/build/

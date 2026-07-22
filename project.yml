@@ -49,6 +49,10 @@ targets:
         UILaunchScreen: {}
         CFBundleDisplayName: Trakt
         NSHealthShareUsageDescription: "Used to factor your steps and sleep into your daily targets."
+        # Apple's binary scanner requires this key for any app linking HealthKit, regardless of
+        # whether write access is actually used — Trakt is read-only (requestAuthorization always
+        # passes toShare: []), confirmed by grepping HealthKitManager before adding this.
+        NSHealthUpdateUsageDescription: "Trakt does not write any data to Health."
         # Every network call in the app is standard HTTPS/TLS (URLSession to USDA, Open Food
         # Facts, the FoodProxy, CloudKit, PostHog) — no custom/proprietary encryption — so this
         # qualifies for App Store Connect's export compliance exemption. Setting it explicitly
