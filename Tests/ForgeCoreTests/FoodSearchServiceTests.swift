@@ -76,6 +76,25 @@ private let openFoodFactsBarcodeFixture = Data("""
 """.utf8)
 
 private let openFoodFactsNotFoundFixture = Data(#"{"status": 0}"#.utf8)
+
+private let fatSecretFixture = Data("""
+{
+  "foods": {
+    "food": [
+      {
+        "food_id": "1",
+        "food_name": "Chicken Breast",
+        "food_description": "Per 100g - Calories: 165kcal | Fat: 3.57g | Carbs: 0.00g | Protein: 31.02g"
+      },
+      {
+        "food_id": "2",
+        "food_name": "Mystery Item With Unparseable Description",
+        "food_description": "Serving info unavailable"
+      }
+    ]
+  }
+}
+""".utf8)
 // swiftlint:enable line_length
 
 @Suite struct FatSecretClientTests {
@@ -113,6 +132,23 @@ private let openFoodFactsNotFoundFixture = Data(#"{"status": 0}"#.utf8)
         #expect(results[0].source == .usda)
     }
 
+    // Feature request — "it only recommends branded foods, I want generic food with no labels at
+    // the top." Confirmed live against the real API that an unscoped search returns mostly
+    // `dataType: "Branded"` matches, crowding out the actual generic entry. Regression coverage for
+    // the fix: the outgoing request must actually scope to USDA's generic/reference datasets.
+    @Test func usdaSearchScopesToGenericDataTypesOnly() async throws {
+        MockURLProtocol.stub(urlContains: "api.nal.usda.gov", data: usdaFixture)
+        let client = USDAFoodDataClient(apiKey: "DEMO_KEY", session: MockURLProtocol.makeSession())
+
+        _ = try await client.search(query: "chicken breast")
+
+        let requestedURL = MockURLProtocol.lastRequestURL?.absoluteString ?? ""
+        #expect(requestedURL.contains("dataType"))
+        #expect(requestedURL.contains("Foundation"))
+        #expect(requestedURL.contains("SR%20Legacy") || requestedURL.contains("SR Legacy"))
+        #expect(!requestedURL.contains("Branded"))
+    }
+
     @Test func openFoodFactsDecodesMixedTypeNutrimentsDictionaryWithoutCrashing() async throws {
         MockURLProtocol.stub(urlContains: "search.pl", data: openFoodFactsFixture)
         let client = OpenFoodFactsClient(session: MockURLProtocol.makeSession())
@@ -143,6 +179,20 @@ private let openFoodFactsNotFoundFixture = Data(#"{"status": 0}"#.utf8)
 
         let result = try await client.lookupBarcode("0000000000000")
         #expect(result == nil)
+    }
+
+    // Feature request — "I feel like I'm getting a lot of low quality results." Same defensive
+    // guard USDA/Open Food Facts already apply: a description that fails to parse into any macros
+    // (unexpected format, truncated text) shouldn't surface as a phantom 0-calorie food.
+    @Test func fatSecretFiltersOutEntriesWithUnparseableDescriptions() async throws {
+        MockURLProtocol.stub(urlContains: "fatsecret.test", data: fatSecretFixture)
+        let client = FatSecretClient(proxyBaseURL: "https://fatsecret.test", proxySharedSecret: "x", session: MockURLProtocol.makeSession())
+
+        let results = try await client.search(query: "chicken breast")
+
+        #expect(results.count == 1)
+        #expect(results[0].name == "Chicken Breast")
+        #expect(results[0].kcal == 165)
     }
 
     @Test func serviceCombinesSourcesAndDedupesByNameAndBrand() async {

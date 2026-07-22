@@ -46,10 +46,14 @@ public actor FatSecretClient {
         let (data, _) = try await session.data(for: request)
         let decoded = try JSONDecoder().decode(SearchResponse.self, from: data)
 
-        return (decoded.foods?.food ?? []).map { food in
+        return (decoded.foods?.food ?? []).compactMap { food in
             // food_description is a single free-text summary like "Per 100g - Calories: 165kcal |
             // Fat: 3.57g | Carbs: 0.00g | Protein: 31.02g" — parsed rather than structured fields.
             let macros = Self.parseMacros(from: food.food_description)
+            // Same defensive guard USDA/Open Food Facts already apply — a description that failed
+            // to parse (unexpected format, truncated text) looks like a genuine 0-calorie food
+            // otherwise, which is worse than just not showing it.
+            guard macros.kcal > 0 || macros.protein > 0 else { return nil }
             return FoodSearchResult(
                 id: "fatsecret-\(food.food_id)",
                 name: food.food_name,

@@ -11,6 +11,10 @@ final class MockURLProtocol: URLProtocol {
     /// Counts actual network hits per source — used to verify FoodSearchService's query cache
     /// actually prevents a second round trip rather than just returning the same-looking data.
     nonisolated(unsafe) static var requestCounts: [String: Int] = [:]
+    /// The most recent request's full URL — lets a test assert on the actual query parameters a
+    /// client sent (e.g. confirming USDA's request really does scope to generic dataTypes) rather
+    /// than just trusting the response fixture matched.
+    nonisolated(unsafe) static var lastRequestURL: URL?
 
     static func resetRequestCounts() { requestCounts = [:] }
 
@@ -28,6 +32,7 @@ final class MockURLProtocol: URLProtocol {
 
     override func startLoading() {
         let url = request.url?.absoluteString ?? ""
+        Self.lastRequestURL = request.url
         guard let (fragment, data) = Self.responseData.first(where: { url.contains($0.key) }) else {
             client?.urlProtocol(self, didFailWithError: URLError(.fileDoesNotExist))
             return
