@@ -49,6 +49,11 @@ targets:
         UILaunchScreen: {}
         CFBundleDisplayName: Trakt
         NSHealthShareUsageDescription: "Used to factor your steps and sleep into your daily targets."
+        # Every network call in the app is standard HTTPS/TLS (URLSession to USDA, Open Food
+        # Facts, the FoodProxy, CloudKit, PostHog) — no custom/proprietary encryption — so this
+        # qualifies for App Store Connect's export compliance exemption. Setting it explicitly
+        # skips the encryption questionnaire on every future TestFlight/App Store upload.
+        ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: App/Forge.entitlements
       properties:
