@@ -73,7 +73,6 @@ struct TrainSessionView: View {
     var body: some View {
         ZStack {
             ForgeColors.backgroundWash
-                .dismissKeyboardOnTap()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .top) {
@@ -125,6 +124,8 @@ struct TrainSessionView: View {
                 .padding(20)
                 .padding(.bottom, 40)
             }
+            .dismissKeyboardOnTap()
+            .scrollDismissesKeyboard(.immediately)
         }
         .navigationTitle(store.currentProgramDayName)
         .navigationBarTitleDisplayMode(.inline)

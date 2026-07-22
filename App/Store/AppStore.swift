@@ -398,13 +398,18 @@ final class AppStore: ObservableObject {
     // serving quantity... macros and calories should update automatically." Replaces the old
     // raw-numeric macro editor: recomputes kcal/proteinG/carbG/fatG from the entry's base macros
     // every time, rather than accepting them as separately typed numbers.
-    func updateFoodEntryPortion(id: FoodEntry.ID, in meal: Meal, name: String, quantity: Double, unit: PortionUnit) {
+    // `referenceGrams` is passed in (not read off the existing entry) because switching to a
+    // weight-based unit on an entry that never had one — "I can't change from servings to g or oz
+    // when I edit, make it so I can" — establishes that reference for the first time; every other
+    // edit just passes the entry's existing value straight back through unchanged.
+    func updateFoodEntryPortion(id: FoodEntry.ID, in meal: Meal, name: String, quantity: Double, unit: PortionUnit, referenceGrams: Double?) {
         guard let index = mealEntries[meal]?.firstIndex(where: { $0.id == id }) else { return }
         var updated = mealEntries[meal]![index]
-        let multiplier = PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: updated.referenceGrams)
+        let multiplier = PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: referenceGrams)
         updated.name = name
         updated.quantity = quantity
         updated.unit = unit
+        updated.referenceGrams = referenceGrams
         updated.kcal = Int((updated.effectiveBaseKcal * multiplier).rounded())
         updated.proteinG = Int((updated.effectiveBaseProteinG * multiplier).rounded())
         updated.carbG = Int((updated.effectiveBaseCarbG * multiplier).rounded())

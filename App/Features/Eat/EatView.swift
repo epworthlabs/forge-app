@@ -258,6 +258,7 @@ private struct FoodEntryEditSheet: View {
     @State private var name: String
     @State private var unit: PortionUnit
     @State private var quantityText: String
+    @State private var referenceGrams: Double?
     @FocusState private var quantityFocused: Bool
     @State private var quantityBeforeFocus: String = ""
 
@@ -267,14 +268,18 @@ private struct FoodEntryEditSheet: View {
         _name = State(initialValue: entry.name)
         _unit = State(initialValue: entry.unit)
         _quantityText = State(initialValue: Self.trimmedDecimal(entry.quantity))
+        _referenceGrams = State(initialValue: entry.referenceGrams)
     }
 
-    // Only offer grams/ounces when this entry actually has a gram reference to scale against —
-    // same fallback as PortionConfirmSheet, and true for every legacy entry logged before this.
-    private var availableUnits: [PortionUnit] { entry.referenceGrams != nil ? [.g, .oz, .servings] : [.servings] }
+    // Bug fix — "I can't change from servings to g or oz when I edit. Make it so I can." All 3
+    // units are always offered now, not just when a gram reference happens to already be known
+    // (e.g. an entry originally logged in plain servings, with nothing to scale grams against, was
+    // permanently stuck there). Switching to g/oz for the first time on such an entry assumes a
+    // 100g reference (see the `onChange` below) so it becomes scalable immediately.
+    private var availableUnits: [PortionUnit] { PortionUnit.allCases }
 
     private var quantity: Double { Double(quantityText) ?? 0 }
-    private var multiplier: Double { PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: entry.referenceGrams) }
+    private var multiplier: Double { PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: referenceGrams) }
 
     private var scaledKcal: Int { Int((entry.effectiveBaseKcal * multiplier).rounded()) }
     private var scaledProtein: Double { entry.effectiveBaseProteinG * multiplier }
@@ -315,6 +320,11 @@ private struct FoodEntryEditSheet: View {
                     ForEach(availableUnits, id: \.self) { u in Text(u.rawValue).tag(u) }
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: unit) { newUnit in
+                    guard newUnit != .servings, referenceGrams == nil else { return }
+                    referenceGrams = 100
+                    quantityText = "100"
+                }
             }
 
             HStack(spacing: 10) {
@@ -325,7 +335,7 @@ private struct FoodEntryEditSheet: View {
             }
 
             Button {
-                store.updateFoodEntryPortion(id: entry.id, in: meal, name: name, quantity: quantity, unit: unit)
+                store.updateFoodEntryPortion(id: entry.id, in: meal, name: name, quantity: quantity, unit: unit, referenceGrams: referenceGrams)
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)

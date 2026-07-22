@@ -52,7 +52,6 @@ struct ProgramEditorView: View {
         NavigationStack {
             ZStack {
                 ForgeColors.backgroundWash
-                    .dismissKeyboardOnTap()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         TextField("Program name", text: $programName)
@@ -170,6 +169,8 @@ struct ProgramEditorView: View {
                     }
                     .padding(20)
                 }
+                .dismissKeyboardOnTap()
+                .scrollDismissesKeyboard(.immediately)
             }
             .navigationTitle(existingProgram == nil ? "Build Program" : "Edit Program")
             .navigationBarTitleDisplayMode(.inline)

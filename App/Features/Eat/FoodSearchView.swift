@@ -39,7 +39,6 @@ struct FoodSearchView: View {
         NavigationStack {
             ZStack {
                 ForgeColors.backgroundWash
-                    .dismissKeyboardOnTap()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         TextField("Search…", text: $query)
@@ -147,6 +146,8 @@ struct FoodSearchView: View {
                     }
                     .padding(20)
                 }
+                .dismissKeyboardOnTap()
+                .scrollDismissesKeyboard(.immediately)
             }
             .navigationTitle("Add to \(meal.rawValue)")
             .navigationBarTitleDisplayMode(.inline)

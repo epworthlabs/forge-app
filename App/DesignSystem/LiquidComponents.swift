@@ -155,11 +155,22 @@ struct FoodMonogram: View {
 /// the keyboard-accessory-toolbar "Done" button (which read as an unstyled system artifact) with
 /// the standard iOS gesture instead: tap anywhere outside the focused field to dismiss. Applied at
 /// the screen/sheet level (once per container), not per-field.
+///
+/// Bug fix — a plain `.onTapGesture` on a background layer sitting *behind* a `ScrollView` in a
+/// `ZStack` never actually fired: `ScrollView` claims touches within its own bounds for its pan
+/// gesture first, so a sibling view behind it never sees the tap at all (this is why "tap
+/// elsewhere in the workout editor" did nothing — the gesture was on the wrong view entirely).
+/// `simultaneousGesture` attached directly to the `ScrollView` itself fires alongside its built-in
+/// scroll/pan recognizer instead of losing to it, so it must be applied to the scrolling view (or
+/// its content), not a sibling behind it. Non-scrolling sheets (no competing ScrollView) work
+/// either way.
 extension View {
     func dismissKeyboardOnTap() -> some View {
-        onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        }
+        simultaneousGesture(
+            TapGesture().onEnded {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+        )
     }
 }
 
