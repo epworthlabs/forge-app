@@ -3,17 +3,24 @@ import PhotosUI
 
 /// Feature request — "let users edit those two fields if they want. If they want to upload a
 /// photo to change their avatar pic they can, and if they want to change their name they can too."
+/// Also — "users should be able to edit their current weight in the profile section... make sure
+/// this is taken into account when determining target calories." Current weight lives on
+/// `AppStore.profile` (CloudKit-synced core domain data), unlike username/avatar which are purely
+/// local `ProfileSettings` — so this sheet touches both.
 struct ProfileEditSheet: View {
+    @EnvironmentObject var store: AppStore
     @ObservedObject private var settings = ProfileSettings.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var username: String
     @State private var avatarData: Data?
     @State private var photoItem: PhotosPickerItem?
+    @State private var currentWeightLb: Int
 
-    init() {
+    init(currentWeightLb: Int) {
         _username = State(initialValue: ProfileSettings.shared.username)
         _avatarData = State(initialValue: ProfileSettings.shared.avatarImageData)
+        _currentWeightLb = State(initialValue: currentWeightLb)
     }
 
     var body: some View {
@@ -48,10 +55,17 @@ struct ProfileEditSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
 
+            HStack {
+                Text("Current weight").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                Spacer()
+                NumpadField(value: $currentWeightLb, maxDigits: 3, range: 50...600, suffix: "lb")
+            }
+
             Button {
                 let trimmed = username.trimmingCharacters(in: .whitespaces)
                 settings.username = trimmed.isEmpty ? settings.username : trimmed
                 settings.avatarImageData = avatarData
+                store.updateCurrentWeight(Double(currentWeightLb))
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
@@ -61,6 +75,6 @@ struct ProfileEditSheet: View {
             .buttonStyle(.plain)
         }
         .padding(22)
-        .presentationDetents([.height(380)])
+        .presentationDetents([.height(460)])
     }
 }

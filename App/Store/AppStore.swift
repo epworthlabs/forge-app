@@ -467,6 +467,23 @@ final class AppStore: ObservableObject {
         Task { await SyncQueue.shared.enqueue(.bodyweightEntry(date: entry.date, weightLb: entry.weightLb)) }
     }
 
+    // Feature request — "users should be able to edit their current weight in the profile section
+    // as well as the goal & target section. Make sure this is taken into account when determining
+    // target calories along with all the other info." Deliberately distinct from `logWeight` (the
+    // frequent "+ Log weight" quick action, which only ever fed the slow, smoothed weekly
+    // recalibration so ordinary day-to-day fluctuation doesn't whipsaw the calorie target) — this
+    // is an explicit "update my stats" edit, the same category `updateGoalAndTarget` already
+    // occupies as the one place besides onboarding allowed to move the baseline directly.
+    // `profile.weightKg` feeds `TDEECalculator`/`estimatedFatFreeMassKg` live on every read (both
+    // are plain computed reads off `profile`, never cached), so `nutritionTarget` reflects this on
+    // its very next access — no extra wiring needed beyond writing the new value and persisting.
+    // Also logs a weigh-in so the bodyweight history/chart never disagrees with the profile.
+    func updateCurrentWeight(_ weightLb: Double) {
+        profile.weightKg = weightLb * 0.45359237
+        logWeight(weightLb)
+        persistProfile()
+    }
+
     // FRG-130/131 — archives today's completed sets into training history and resets the slate
     // for next time. There was previously no path that ever appended to `trailingSessions`, so
     // Load Score never actually changed session to session for a real user.

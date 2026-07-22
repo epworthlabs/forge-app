@@ -9,6 +9,11 @@ struct GoalTargetEditSheet: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
+    // Feature request — "users should be able to edit their current weight... in the goal &
+    // target section as well. Make sure this is taken into account when determining target
+    // calories." Distinct from `targetWeightLb` below (where you're trying to get to) — this is
+    // where you are right now, which is what `TDEECalculator` actually uses for BMR/TDEE.
+    @State private var currentWeightLb: Int = 150
     @State private var goal: Goal = .maintain
     @State private var targetWeightLb: Double = 150
     @State private var targetWeeks: Int = 12
@@ -30,6 +35,13 @@ struct GoalTargetEditSheet: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Current weight").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                        Spacer()
+                        NumpadField(value: $currentWeightLb, maxDigits: 3, range: 50...600, suffix: "lb")
+                    }
+                    .padding(16).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
                     ForEach([Goal.cut, .bulk, .recomp, .maintain], id: \.self) { g in
                         Button { goal = g } label: {
                             Text(g.displayLabel).font(ForgeType.body).frame(maxWidth: .infinity, alignment: .leading)
@@ -96,6 +108,7 @@ struct GoalTargetEditSheet: View {
             }
 
             Button {
+                store.updateCurrentWeight(Double(currentWeightLb))
                 store.updateGoalAndTarget(goal: goal, targetWeightLb: targetWeightLb, targetWeeks: targetWeeks)
                 if useCustomMacros {
                     store.updateMacroSplit(proteinPercent: Double(proteinPercent) / 100, carbPercent: Double(carbPercent) / 100, fatPercent: Double(fatPercent) / 100)
@@ -115,6 +128,7 @@ struct GoalTargetEditSheet: View {
         .onAppear {
             guard !hasSeeded else { return }
             hasSeeded = true
+            currentWeightLb = WeightUnit.roundedLb(fromKg: store.profile.weightKg)
             goal = store.profile.goal
             targetWeightLb = (store.profile.targetWeightKg ?? store.profile.weightKg) / 0.45359237
             targetWeeks = store.profile.targetWeeks ?? 12

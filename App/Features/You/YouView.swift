@@ -150,7 +150,7 @@ struct YouView: View {
         }
         .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
         .sheet(isPresented: $editingGoalTarget) { GoalTargetEditSheet() }
-        .sheet(isPresented: $editingProfile) { ProfileEditSheet() }
+        .sheet(isPresented: $editingProfile) { ProfileEditSheet(currentWeightLb: WeightUnit.roundedLb(fromKg: store.profile.weightKg)) }
         .sheet(isPresented: $showingExportSheet) { ActivityShareSheet(items: exportedFiles) }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than
