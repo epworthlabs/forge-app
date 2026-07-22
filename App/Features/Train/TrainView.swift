@@ -412,12 +412,10 @@ private struct EditableSetRow: View {
                 get: { WeightUnit.lb(fromKg: set.weightKg) },
                 set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: WeightUnit.kg(fromLb: $0), reps: set.reps) }
             ))
-            Stepper(value: Binding(
+            RepsNumberField(reps: Binding(
                 get: { set.reps },
                 set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
-            ), in: 1...50) {
-                Text("\(set.reps) reps").font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-            }
+            ))
             if canRemove {
                 Button { store.removeSet(exerciseID: exerciseID, setID: set.id) } label: {
                     Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
@@ -433,9 +431,14 @@ private struct EditableSetRow: View {
 
 /// Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb increments
 /// as well." A digit-filtered numeric-keypad TextField for typing an exact number directly,
-/// flanked by the existing quick-adjust buttons for small corrections mid-set.
+/// flanked by the existing quick-adjust buttons for small corrections mid-set. Clears on focus —
+/// "I don't want to have to select the number when editing the field, just want the numpad to
+/// pull up and the field to edit when I start entering numbers" — so the first digit typed
+/// replaces the old value instead of appending to it.
 private struct WeightNumberField: View {
     @Binding var weightLb: Double
+    @FocusState private var isFocused: Bool
+    @State private var text: String = ""
 
     var body: some View {
         HStack(spacing: 6) {
@@ -446,21 +449,85 @@ private struct WeightNumberField: View {
             .buttonStyle(.plain)
 
             HStack(spacing: 3) {
-                TextField("", text: Binding(
-                    get: { String(Int(weightLb.rounded())) },
-                    set: { newText in
-                        let digits = newText.filter(\.isNumber)
-                        weightLb = min(1100, max(0, Double(digits) ?? 0))
+                TextField("", text: $text)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 34)
+                    .focused($isFocused)
+                    .onAppear { text = String(Int(weightLb.rounded())) }
+                    .onChange(of: weightLb) { newValue in
+                        if !isFocused { text = String(Int(newValue.rounded())) }
                     }
-                ))
-                .keyboardType(.numberPad)
-                .multilineTextAlignment(.trailing)
-                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-                .frame(width: 34)
+                    .onChange(of: isFocused) { focused in
+                        if focused {
+                            text = ""
+                        } else if text.isEmpty {
+                            text = String(Int(weightLb.rounded()))
+                        }
+                    }
+                    .onChange(of: text) { newText in
+                        let digits = newText.filter(\.isNumber)
+                        if digits != newText { text = digits }
+                        guard let parsed = Double(digits) else { return }
+                        weightLb = min(1100, max(0, parsed))
+                    }
                 Text("lb").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             }
 
             Button { weightLb = min(1100, weightLb + 5) } label: {
+                Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// Same clear-on-focus typed-entry pattern as `WeightNumberField`, for reps — "make the numpad
+/// entering more intuitive when editing weights and reps," matching formatting/sizing exactly so
+/// the row reads as one consistent control, not two different styles.
+private struct RepsNumberField: View {
+    @Binding var reps: Int
+    @FocusState private var isFocused: Bool
+    @State private var text: String = ""
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { reps = max(1, reps - 1) } label: {
+                Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 3) {
+                TextField("", text: $text)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 22)
+                    .focused($isFocused)
+                    .onAppear { text = String(reps) }
+                    .onChange(of: reps) { newValue in
+                        if !isFocused { text = String(newValue) }
+                    }
+                    .onChange(of: isFocused) { focused in
+                        if focused {
+                            text = ""
+                        } else if text.isEmpty {
+                            text = String(reps)
+                        }
+                    }
+                    .onChange(of: text) { newText in
+                        let digits = newText.filter(\.isNumber)
+                        if digits != newText { text = digits }
+                        guard let parsed = Int(digits) else { return }
+                        reps = min(50, max(1, parsed))
+                    }
+                Text("reps").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+
+            Button { reps = min(50, reps + 1) } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
                     .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
             }

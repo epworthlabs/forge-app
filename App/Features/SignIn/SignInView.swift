@@ -62,27 +62,8 @@ struct SignInView: View {
                 .frame(height: 50)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .padding(.horizontal, 24)
-
-                legalFooter
-                    .padding(.top, 4)
-                    .padding(.bottom, 40)
+                .padding(.bottom, 40)
             }
         }
-    }
-
-    // "Terms" has no real page yet (unlike Privacy Policy, which is live) — styled to match but
-    // deliberately not a tappable Link, rather than wiring it to a page that doesn't exist.
-    private var legalFooter: some View {
-        (
-            Text("By continuing, you agree to our ")
-                + Text("Terms").foregroundColor(.white.opacity(0.85))
-                + Text(" and ")
-                + Text("[Privacy Policy](https://forge-food-proxy.onrender.com/privacy)")
-        )
-        .font(ForgeType.caption)
-        .foregroundColor(.white.opacity(0.6))
-        .tint(.white.opacity(0.85))
-        .multilineTextAlignment(.center)
-        .padding(.horizontal, 32)
     }
 }
