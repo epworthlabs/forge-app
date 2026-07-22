@@ -10,26 +10,35 @@ public actor FoodSearchService {
     /// Open Food Facts has no locale awareness by default and skews heavily European in an
     /// unscoped search — see OpenFoodFactsClient.search doc comment. nil means unscoped/global.
     private let countryFilter: String?
+    /// FatSecret's proxy (FoodProxy/, Render free tier) spins down after ~15 minutes idle — a cold
+    /// start can take 30-60s. Without a cap, one slow/cold source blocked the *entire* search that
+    /// long even though USDA/Open Food Facts had already come back — this is what made lookups feel
+    /// unresponsive. Overridable so tests don't have to actually wait out the timeout.
+    private let sourceTimeout: Duration
 
-    public init(credentials: FoodDatabaseCredentials, countryFilter: String? = nil, session: URLSession = .shared) {
+    public init(credentials: FoodDatabaseCredentials, countryFilter: String? = nil, session: URLSession = .shared, sourceTimeout: Duration = .seconds(8)) {
         self.usda = USDAFoodDataClient(apiKey: credentials.usdaAPIKey, session: session)
         self.openFoodFacts = OpenFoodFactsClient(session: session)
         self.fatSecret = credentials.hasFatSecretProxyConfig
             ? FatSecretClient(proxyBaseURL: credentials.fatSecretProxyBaseURL!, proxySharedSecret: credentials.fatSecretProxySharedSecret!, session: session)
             : nil
         self.countryFilter = countryFilter
+        self.sourceTimeout = sourceTimeout
     }
 
     public func search(query: String) async -> [FoodSearchResult] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
-        async let usdaResults = try? usda.search(query: query)
-        async let offResults = try? openFoodFacts.search(query: query, countryFilter: countryFilter)
-        async let fatSecretResults = fatSecret?.search(query: query)
+        async let usdaResults = Self.withTimeout(sourceTimeout) { try await self.usda.search(query: query) }
+        async let offResults = Self.withTimeout(sourceTimeout) { try await self.openFoodFacts.search(query: query, countryFilter: self.countryFilter) }
+        async let fatSecretResults: [FoodSearchResult]? = {
+            guard let fatSecret else { return nil }
+            return await Self.withTimeout(sourceTimeout) { try await fatSecret.search(query: query) }
+        }()
 
         let usda = (await usdaResults) ?? []
         let off = (await offResults) ?? []
-        let fs = (try? await fatSecretResults) ?? []
+        let fs = (await fatSecretResults) ?? []
 
         // Open Food Facts first: best barcode/packaged-food coverage, most likely to match what a
         // user actually scans or searches for day to day. USDA next for generic/whole foods.
@@ -88,5 +97,21 @@ public actor FoodSearchService {
         // FatSecret's barcode support requires a separate food.find_id_for_barcode call before
         // foods.get — not implemented here; falls through to manual entry until that's built.
         return nil
+    }
+
+    /// Races `operation` against a timeout — whichever finishes first wins, and the loser is
+    /// cancelled. `URLSession`'s `data(for:)` honors cooperative cancellation, so a timed-out
+    /// request is actually aborted, not just ignored.
+    private static func withTimeout<T: Sendable>(_ duration: Duration, operation: @escaping @Sendable () async throws -> T) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { try? await operation() }
+            group.addTask {
+                try? await Task.sleep(for: duration)
+                return nil
+            }
+            let result = await group.next()
+            group.cancelAll()
+            return result ?? nil
+        }
     }
 }

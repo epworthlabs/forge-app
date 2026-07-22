@@ -176,4 +176,32 @@ private let openFoodFactsNotFoundFixture = Data(#"{"status": 0}"#.utf8)
         #expect(!results.contains { $0.source == .fatSecret })
         #expect(results.count == 2)
     }
+
+    // Regression coverage — FatSecret's proxy (Render free tier) cold-starting after idle used to
+    // block the *entire* search on it, even though USDA/Open Food Facts had already come back.
+    // Uses a tiny injected timeout + a deliberately slower stubbed response so this doesn't
+    // actually wait out a real-world 8s timeout.
+    @Test func slowSourceTimesOutWithoutBlockingFasterSources() async throws {
+        MockURLProtocol.stub(urlContains: "api.nal.usda.gov", data: usdaFixture)
+        MockURLProtocol.stub(urlContains: "search.pl", data: openFoodFactsFixture)
+        MockURLProtocol.stubDelayed(urlContains: "forge-food-proxy.test", data: usdaFixture, delay: 0.3)
+        let credentials = FoodDatabaseCredentials(
+            usdaAPIKey: "DEMO_KEY",
+            fatSecretProxyBaseURL: "https://forge-food-proxy.test",
+            fatSecretProxySharedSecret: "secret"
+        )
+        let service = FoodSearchService(
+            credentials: credentials, session: MockURLProtocol.makeSession(), sourceTimeout: .milliseconds(50)
+        )
+
+        let start = ContinuousClock.now
+        let results = await service.search(query: "chicken")
+        let elapsed = start.duration(to: .now)
+
+        // The 0.3s delayed FatSecret response should get cut off by the 50ms timeout, not awaited
+        // in full — total time stays close to the timeout, nowhere near the full delay.
+        #expect(elapsed < .milliseconds(250))
+        #expect(!results.contains { $0.source == .fatSecret })
+        #expect(results.count == 2) // USDA + Open Food Facts still came back
+    }
 }
