@@ -36,7 +36,16 @@ struct MainTabView: View {
             // FRG-114 — catches the case where the app was force-quit while offline: network
             // restore alone can't trigger a flush if nothing was running to observe it, so also
             // flush whenever the app comes back to the foreground.
-            if phase == .active { Task { await SyncQueue.shared.flush() } }
+            // Feature request — "make sure the app knows when we've moved on to the next week and
+            // day... everything in the app updates when a new day and week begins." Backgrounding
+            // and resuming (not a full relaunch) never re-checked whether the calendar day had
+            // rolled over; this is that check, run every time the app becomes active.
+            if phase == .active {
+                Task {
+                    await store.refreshForNewDayIfNeeded()
+                    await SyncQueue.shared.flush()
+                }
+            }
         }
     }
 }

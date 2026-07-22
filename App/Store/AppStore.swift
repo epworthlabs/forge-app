@@ -88,6 +88,14 @@ final class AppStore: ObservableObject {
     // training right now.
     @Published private(set) var activeWeek: Int
 
+    // Feature request — "make sure the app knows when we've moved on to the next week and day...
+    // just make sure everything in the app updates when a new day and week begins." Nothing
+    // previously noticed the wall-clock day changing while the app stayed running (backgrounded
+    // and resumed, not fully relaunched) — `mealEntries`/`activeWeek`/`todaysExercises` only ever
+    // got recomputed by explicit user actions. Tracked here so `refreshForNewDayIfNeeded()` (called
+    // from `MainTabView`'s scenePhase-active hook) has something to compare "now" against.
+    private var lastKnownDate = Date()
+
     @Published var trailingSessions: [WorkoutSession] = []
     @Published var todaysExercises: [ExerciseSlot]
     // FRG-111 — a Date, not a countdown Int: computing "remaining = end − now" fresh each tick is
@@ -261,6 +269,21 @@ final class AppStore: ObservableObject {
         persistProfile()
     }
 
+    // Feature request — "there needs to be a way to delete a workout program... hold and delete,
+    // much like iOS." Always leaves at least one program (nothing to fall back to otherwise); if
+    // the deleted program was the active one, activates whatever's left instead of leaving `program`
+    // pointing at a template no longer in `savedPrograms`.
+    func removeProgram(_ target: ProgramTemplate) {
+        guard savedPrograms.count > 1 else { return }
+        let wasActive = target.id == program.id
+        savedPrograms.removeAll { $0.id == target.id }
+        if wasActive, let next = savedPrograms.first {
+            activateProgram(next)
+        } else {
+            persistProfile()
+        }
+    }
+
     // Feature request — DaySelectionView's explicit "do this day" choice, distinct from Finish
     // Workout's automatic rotation to the next day in sequence. `week` defaults to the real
     // current week, but DaySelectionView can pass a different one when the user has browsed to
@@ -291,6 +314,19 @@ final class AppStore: ObservableObject {
         guard !days.isEmpty else { return 0 }
         let done = completedDayIndices(forWeek: week)
         return (0..<days.count).first { !done.contains($0) } ?? 0
+    }
+
+    // Feature request — "there needs to be a way to delete... workouts within the week... hold
+    // and delete." Scoped to the viewed week only (not every week the program has) — creates or
+    // overwrites that week's override with the day removed, leaving other weeks untouched. Always
+    // leaves at least one day in the week.
+    func removeDay(atIndex index: Int, forWeek week: Int) {
+        var days = program.days(forWeek: week)
+        guard days.indices.contains(index), days.count > 1 else { return }
+        days.remove(at: index)
+        var updated = program
+        updated.weekOverrides[week] = days
+        updateProgram(updated)
     }
 
     // Feature request — "this figure should not change unless these settings are changed in the
@@ -602,6 +638,26 @@ final class AppStore: ObservableObject {
         if let sessions = await sessions, !sessions.isEmpty { trailingSessions = sessions }
         if let weighIns = await weighIns, !weighIns.isEmpty { bodyweightLogLb = weighIns }
         if let todaysFood = await todaysFood { mealEntries = todaysFood }
+        refreshLastPerformance()
+    }
+
+    // Feature request — "make sure the app knows when we've moved on to the next week and day...
+    // my food log in the eat tab and the metrics on the today tab didn't update... even my
+    // calendar didn't retain the workout from yesterday." Call whenever the app becomes active
+    // (see `MainTabView`'s scenePhase hook) — a no-op unless the wall-clock day has actually
+    // changed since the last check, so this doesn't hit CloudKit on every foreground within the
+    // same day. Re-fetching history picks up anything that finished syncing while backgrounded
+    // (addresses "the calendar didn't retain yesterday's workout"); resetting `mealEntries` to a
+    // fresh fetch scoped to the new "today" clears out yesterday's stale entries instead of
+    // leaving them showing under a new day; rebuilding `todaysExercises` against the recomputed
+    // `activeWeek` picks up a week boundary crossed while away, without changing which day was
+    // already selected.
+    func refreshForNewDayIfNeeded() async {
+        guard !Calendar.current.isDate(lastKnownDate, inSameDayAs: Date()) else { return }
+        lastKnownDate = Date()
+        await loadHistoryFromCloudKit()
+        activeWeek = currentProgramWeek
+        todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
     }
 

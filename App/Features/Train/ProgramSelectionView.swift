@@ -26,6 +26,17 @@ struct ProgramSelectionView: View {
                                 if program.id != store.program.id { store.activateProgram(program) }
                                 onProgramReady()
                             }
+                            // Feature request — "there needs to be a way to delete a workout
+                            // program... would prefer a hold and delete function much like iOS
+                            // has with their apps." Hidden entirely when it's the only program —
+                            // there always has to be at least one to fall back to.
+                            .contextMenu {
+                                if store.savedPrograms.count > 1 {
+                                    Button("Delete Program", role: .destructive) {
+                                        store.removeProgram(program)
+                                    }
+                                }
+                            }
                         }
 
                         Button { buildingNewProgram = true } label: {

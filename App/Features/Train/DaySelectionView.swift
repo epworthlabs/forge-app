@@ -73,6 +73,16 @@ struct DaySelectionView: View {
                                 ) {
                                     onSelectDay(index, viewingWeek)
                                 }
+                                // Feature request — "there needs to be a way to delete... workouts
+                                // within the week... hold and delete function much like iOS." Only
+                                // this viewed week is affected; hidden when it's the last day left.
+                                .contextMenu {
+                                    if days.count > 1 {
+                                        Button("Delete Workout", role: .destructive) {
+                                            store.removeDay(atIndex: index, forWeek: viewingWeek)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

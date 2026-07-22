@@ -4,11 +4,18 @@ import ForgeCore
 struct TodayView: View {
     @EnvironmentObject var store: AppStore
     @Binding var selectedTab: MainTab
+    @ObservedObject private var profileSettings = ProfileSettings.shared
     @State private var reviewingSession = false
 
+    // Bug fix — "if I start a new workout it'll revert back to not done yet, if a user marks off
+    // a workout for that day, it should not revert back to incomplete." This used to read
+    // `store.lastCompletedSession`, a transient "just finished, offer a review" pointer that
+    // `selectDay` clears to nil the moment the user taps *any* day tile (even just to start a
+    // different workout) — so completing today's workout, then merely opening Train again, made
+    // this tile forget it ever happened. Deriving from `trailingSessions` (persistent history)
+    // instead means it reflects reality regardless of what else the user has navigated to since.
     private var todaysCompletedSession: WorkoutSession? {
-        guard let session = store.lastCompletedSession, Calendar.current.isDateInToday(session.date) else { return nil }
-        return session
+        store.trailingSessions.last { Calendar.current.isDateInToday($0.date) }
     }
 
     var body: some View {
@@ -22,11 +29,10 @@ struct TodayView: View {
                             Text("Today").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
                         }
                         Spacer()
-                        Circle()
-                            .fill(ForgeColors.avatarBackground)
-                            .overlay(Circle().strokeBorder(ForgeColors.avatarBorder, lineWidth: 1))
-                            .background(.ultraThinMaterial, in: Circle())
-                            .frame(width: 38, height: 38)
+                        // Feature request — "make sure it reflects the image in the profile
+                        // section of the you page." Was a plain placeholder circle, never wired
+                        // to `ProfileSettings` at all.
+                        AvatarView(imageData: profileSettings.avatarImageData, size: 38)
                     }
 
                     let target = store.nutritionTarget

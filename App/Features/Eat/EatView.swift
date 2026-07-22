@@ -158,84 +158,38 @@ private struct ReadOnlyFoodEntryRow: View {
     }
 }
 
-/// Feature request — "the foods logged also need to be editable and deletable. to delete, lets
-/// make it a swipe left action on the food item but also offer an icon to delete." No native
-/// `List` in this screen (everything else is a plain `ScrollView`, styled for the app's "Liquid
-/// Glass" look, and nesting a `List` for `.swipeActions` inside that ScrollView fights SwiftUI's
-/// sizing rather than working with it) — so the swipe is a small hand-rolled drag gesture instead,
-/// revealing a delete button behind the row. Tapping the row (when not swiped open) edits it;
-/// tapping the trash icon or the revealed swipe button both delete directly, no confirmation
-/// needed since it's a single quick undo-by-re-adding action, not a destructive multi-item wipe.
+/// Feature request — "get rid of the swipe and delete function, doesn't add any value when there's
+/// an icon to delete." The hand-rolled swipe-to-reveal gesture (FRG-358) is gone; the always-
+/// visible trash icon is the sole delete affordance now. Tapping the row itself opens the edit sheet.
 private struct FoodEntryRow: View {
     @EnvironmentObject var store: AppStore
     let meal: Meal
     let entry: FoodEntry
-    @State private var offset: CGFloat = 0
     @State private var editing = false
 
-    private let revealWidth: CGFloat = 72
-
     var body: some View {
-        ZStack(alignment: .trailing) {
+        HStack(spacing: 10) {
+            FoodMonogram(name: entry.name).frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                Text("\(entry.proteinG)g P · \(entry.carbG)g C · \(entry.fatG)g F")
+                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+            Spacer()
+            Text("\(entry.kcal)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             Button {
                 withAnimation(.easeOut(duration: 0.2)) { store.removeFoodEntry(id: entry.id, from: meal) }
             } label: {
-                Image(systemName: "trash")
-                    .foregroundStyle(.white)
-                    .frame(width: revealWidth)
-                    .frame(maxHeight: .infinity)
-                    .background(Color.red)
+                Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
-
-            HStack(spacing: 10) {
-                FoodMonogram(name: entry.name).frame(width: 30, height: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                    Text("\(entry.proteinG)g P · \(entry.carbG)g C · \(entry.fatG)g F")
-                        .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                }
-                Spacer()
-                Text("\(entry.kcal)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { store.removeFoodEntry(id: entry.id, from: meal) }
-                } label: {
-                    Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.vertical, 4).padding(.horizontal, 8)
-            .frame(maxWidth: .infinity)
-            // Deliberately opaque, not the shared translucent `tileBackground` used elsewhere —
-            // this needs to fully hide the delete button behind it until actually swiped, which a
-            // "Liquid Glass" frosted/translucent fill can't do (confirmed live: tileBackground is
-            // 50%/8% alpha, so the red bled straight through even at rest).
-            .background(Color(.systemBackground))
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if offset != 0 {
-                    withAnimation(.easeOut(duration: 0.2)) { offset = 0 }
-                } else {
-                    editing = true
-                }
-            }
-            .offset(x: offset)
-            .gesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        let translation = value.translation.width
-                        guard translation < 0 || offset < 0 else { return }
-                        offset = max(translation + min(offset, 0), -revealWidth)
-                    }
-                    .onEnded { value in
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            offset = value.translation.width < -revealWidth / 2 ? -revealWidth : 0
-                        }
-                    }
-            )
         }
+        .padding(.vertical, 4).padding(.horizontal, 8)
         .frame(maxWidth: .infinity)
+        .background(ForgeColors.tileBackground)
+        .contentShape(Rectangle())
+        .onTapGesture { editing = true }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .sheet(isPresented: $editing) {
             FoodEntryEditSheet(meal: meal, entry: entry)
