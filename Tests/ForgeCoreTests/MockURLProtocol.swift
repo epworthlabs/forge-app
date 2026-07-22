@@ -8,6 +8,11 @@ final class MockURLProtocol: URLProtocol {
     /// Simulates a slow/cold-started source (e.g. Render free-tier spin-up) for timeout tests —
     /// keyed the same way as `responseData`, defaults to no delay.
     nonisolated(unsafe) static var responseDelay: [String: TimeInterval] = [:]
+    /// Counts actual network hits per source — used to verify FoodSearchService's query cache
+    /// actually prevents a second round trip rather than just returning the same-looking data.
+    nonisolated(unsafe) static var requestCounts: [String: Int] = [:]
+
+    static func resetRequestCounts() { requestCounts = [:] }
 
     static func stub(urlContains fragment: String, data: Data) {
         responseData[fragment] = data
@@ -27,6 +32,7 @@ final class MockURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.fileDoesNotExist))
             return
         }
+        Self.requestCounts[fragment, default: 0] += 1
         let respond = { [weak self] in
             guard let self, let requestURL = self.request.url else { return }
             let response = HTTPURLResponse(url: requestURL, statusCode: 200, httpVersion: nil, headerFields: nil)!

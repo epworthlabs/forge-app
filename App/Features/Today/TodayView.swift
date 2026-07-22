@@ -52,34 +52,22 @@ struct TodayView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // Feature request — "get rid of the ring called sets logged, instead, when
-                    // user completes their workout, give them a checkbox that denotes that todays
-                    // workout is complete and if they tap, allow them to review the workout."
-                    if let session = todaysCompletedSession {
-                        Button { reviewingSession = true } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 22)).foregroundStyle(ForgeColors.accent)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Today's workout complete").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                                    Text("Tap to review").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(ForgeColors.inkMuted).font(.caption)
-                            }
-                            .padding(16)
-                            .background(.ultraThinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .sheet(isPresented: $reviewingSession) {
-                            NavigationStack { SessionReviewView(session: session) }
-                        }
-                    }
-
-                    if store.hasTrainingHistory {
+                    // Feature request — "I want that square tile with the ring that shows % of
+                    // calories consumed fixed on the home screen below the nutrition target card.
+                    // Beside it, place and fix the checkbox tile denoting a workout complete."
+                    // Both tiles are now always present (previously each collapsed away under its
+                    // own gating condition — training history for the ring, an unfinished workout
+                    // for the checkbox — which is exactly what made them feel like they moved
+                    // around rather than living in a fixed spot).
+                    HStack(spacing: 12) {
                         RingStat(label: "kcal eaten", value: "\(totals.kcal)",
                                  progress: target.calories > 0 ? min(1.0, Double(totals.kcal) / target.calories) : 0, color: ForgeColors.accent2)
+                        WorkoutStatusTile(session: todaysCompletedSession) { reviewingSession = true }
+                    }
+                    .sheet(isPresented: $reviewingSession) {
+                        if let session = todaysCompletedSession {
+                            NavigationStack { SessionReviewView(session: session) }
+                        }
                     }
 
                     GlassCard {
@@ -117,5 +105,35 @@ struct TodayView: View {
             }
         }
         .sheet(isPresented: $store.sheetPresented) { TargetExplanationSheet() }
+    }
+}
+
+/// The square, ring-shaped counterpart to `RingStat` for workout-complete status — same footprint
+/// (`GlassCard`, 74×74 ring) so the two sit evenly side by side. Tapping only does something once
+/// there's a session to review; an unfinished day renders as a plain empty ring, not a dead button.
+private struct WorkoutStatusTile: View {
+    let session: WorkoutSession?
+    var onTap: () -> Void
+
+    var body: some View {
+        GlassCard {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle().stroke(ForgeColors.ringTrack, lineWidth: 8)
+                    if session != nil {
+                        Circle().stroke(ForgeColors.accent, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    }
+                    Circle().fill(ForgeColors.ringFillBackground).padding(9)
+                    Image(systemName: session != nil ? "checkmark" : "circle")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(session != nil ? ForgeColors.accent : ForgeColors.inkMuted)
+                }
+                .frame(width: 74, height: 74)
+                Text(session != nil ? "Workout done" : "Not done yet").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if session != nil { onTap() } }
     }
 }

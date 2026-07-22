@@ -150,18 +150,15 @@ struct FoodMonogram: View {
     }
 }
 
-/// Feature request — "in all cases of a numpad, there needs to be a submit button that closes
-/// the numpad." The `.numberPad`/`.decimalPad` keyboards have no built-in Return/Done key (unlike
-/// the standard alphabetic keyboard), so every numeric-keypad field in the app attaches this to
-/// the keyboard's own accessory toolbar instead of relying on tap-elsewhere-to-dismiss.
+/// Feature request — "get rid of the done buttons on the numpad in all instances, it looks like a
+/// bug, I just want a way for the users to hide the numpad after they finish entering." Replaces
+/// the keyboard-accessory-toolbar "Done" button (which read as an unstyled system artifact) with
+/// the standard iOS gesture instead: tap anywhere outside the focused field to dismiss. Applied at
+/// the screen/sheet level (once per container), not per-field.
 extension View {
-    func numpadDoneButton(isFocused: FocusState<Bool>.Binding) -> some View {
-        toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { isFocused.wrappedValue = false }
-                    .fontWeight(.semibold)
-            }
+    func dismissKeyboardOnTap() -> some View {
+        onTapGesture {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
     }
 }
@@ -188,7 +185,6 @@ struct NumpadField: View {
                 .multilineTextAlignment(.center)
                 .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                 .focused($isFocused)
-                .numpadDoneButton(isFocused: $isFocused)
                 .frame(minWidth: 40)
             if let suffix {
                 Text(suffix).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)

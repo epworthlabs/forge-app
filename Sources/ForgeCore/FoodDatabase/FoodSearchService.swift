@@ -15,8 +15,18 @@ public actor FoodSearchService {
     /// long even though USDA/Open Food Facts had already come back — this is what made lookups feel
     /// unresponsive. Overridable so tests don't have to actually wait out the timeout.
     private let sourceTimeout: Duration
+    /// Feature request — "make searching for food items even more robust." FatSecret gets its own,
+    /// shorter budget: a cold Render instance takes 30-60s to wake, which always blows past even an
+    /// 8s cap and contributes nothing regardless — waiting the full `sourceTimeout` for it bought
+    /// nothing but latency. Shorter here means a cold FatSecret gives up sooner without changing
+    /// USDA/Open Food Facts' own budget at all.
+    private let fatSecretTimeout: Duration
+    /// Session-scoped query cache — retyping (or backspacing back to) an already-searched term
+    /// returns instantly instead of re-hitting all 3 network sources from scratch. Keyed by the
+    /// same normalized form used for ranking, so casing/whitespace differences still hit the cache.
+    private var cache: [String: [FoodSearchResult]] = [:]
 
-    public init(credentials: FoodDatabaseCredentials, countryFilter: String? = nil, session: URLSession = .shared, sourceTimeout: Duration = .seconds(8)) {
+    public init(credentials: FoodDatabaseCredentials, countryFilter: String? = nil, session: URLSession = .shared, sourceTimeout: Duration = .seconds(8), fatSecretTimeout: Duration = .seconds(4)) {
         self.usda = USDAFoodDataClient(apiKey: credentials.usdaAPIKey, session: session)
         self.openFoodFacts = OpenFoodFactsClient(session: session)
         self.fatSecret = credentials.hasFatSecretProxyConfig
@@ -24,16 +34,19 @@ public actor FoodSearchService {
             : nil
         self.countryFilter = countryFilter
         self.sourceTimeout = sourceTimeout
+        self.fatSecretTimeout = fatSecretTimeout
     }
 
     public func search(query: String) async -> [FoodSearchResult] {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+        let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !normalizedQuery.isEmpty else { return [] }
+        if let cached = cache[normalizedQuery] { return cached }
 
         async let usdaResults = Self.withTimeout(sourceTimeout) { try await self.usda.search(query: query) }
         async let offResults = Self.withTimeout(sourceTimeout) { try await self.openFoodFacts.search(query: query, countryFilter: self.countryFilter) }
         async let fatSecretResults: [FoodSearchResult]? = {
             guard let fatSecret else { return nil }
-            return await Self.withTimeout(sourceTimeout) { try await fatSecret.search(query: query) }
+            return await Self.withTimeout(fatSecretTimeout) { try await fatSecret.search(query: query) }
         }()
 
         let usda = (await usdaResults) ?? []
@@ -51,7 +64,6 @@ public actor FoodSearchService {
         // nutrition entry first — branded products only outrank it when the query itself names
         // that brand (e.g. "quest bar"). Source order above is just the merge/dedup priority;
         // this is the actual display order.
-        let normalizedQuery = query.lowercased().trimmingCharacters(in: .whitespaces)
         let indexed = combined.enumerated().map { (offset: $0.offset, result: $0.element) }
         let ranked = indexed.sorted { lhs, rhs in
             let lScore = Self.rankScore(for: lhs.result, query: normalizedQuery)
@@ -59,7 +71,9 @@ public actor FoodSearchService {
             if lScore != rScore { return lScore > rScore }
             return lhs.offset < rhs.offset
         }
-        return ranked.map(\.result)
+        let results = ranked.map(\.result)
+        cache[normalizedQuery] = results
+        return results
     }
 
     private static func rankScore(for result: FoodSearchResult, query: String) -> Int {

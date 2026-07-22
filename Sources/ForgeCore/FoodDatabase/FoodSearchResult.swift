@@ -1,10 +1,12 @@
 import Foundation
 
-public enum FoodSource: String, Sendable, Equatable {
+public enum FoodSource: String, Sendable, Equatable, Codable {
     case usda, openFoodFacts, fatSecret
 }
 
-public struct FoodSearchResult: Identifiable, Sendable, Equatable {
+// Feature request — favorites need to persist across launches (see AppStore.favoriteFoods,
+// UserDefaults-backed); Codable lets that be a plain JSON blob rather than a new CloudKit schema.
+public struct FoodSearchResult: Identifiable, Sendable, Equatable, Codable {
     public var id: String
     public var name: String
     public var brand: String?

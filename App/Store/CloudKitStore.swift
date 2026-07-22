@@ -143,6 +143,15 @@ actor CloudKitStore {
         record["proteinG"] = entry.proteinG
         record["carbG"] = entry.carbG
         record["fatG"] = entry.fatG
+        // Feature request — serving-quantity editing. Additive fields; older records simply lack
+        // them and decode via FoodEntry's own defaults/fallbacks in fetchFoodEntries below.
+        record["quantity"] = entry.quantity
+        record["unit"] = entry.unit.rawValue
+        if let referenceGrams = entry.referenceGrams { record["referenceGrams"] = referenceGrams }
+        if let baseKcal = entry.baseKcal { record["baseKcal"] = baseKcal }
+        if let baseProteinG = entry.baseProteinG { record["baseProteinG"] = baseProteinG }
+        if let baseCarbG = entry.baseCarbG { record["baseCarbG"] = baseCarbG }
+        if let baseFatG = entry.baseFatG { record["baseFatG"] = baseFatG }
         _ = try await database.save(record)
     }
 
@@ -168,7 +177,17 @@ actor CloudKitStore {
                   let carbG = record["carbG"] as? Int,
                   let fatG = record["fatG"] as? Int
             else { continue }
-            byMeal[meal, default: []].append(FoodEntry(date: date, name: name, kcal: kcal, proteinG: proteinG, carbG: carbG, fatG: fatG))
+            let unit = (record["unit"] as? String).flatMap(PortionUnit.init(rawValue:)) ?? .servings
+            byMeal[meal, default: []].append(FoodEntry(
+                date: date, name: name, kcal: kcal, proteinG: proteinG, carbG: carbG, fatG: fatG,
+                quantity: record["quantity"] as? Double ?? 1,
+                unit: unit,
+                referenceGrams: record["referenceGrams"] as? Double,
+                baseKcal: record["baseKcal"] as? Double,
+                baseProteinG: record["baseProteinG"] as? Double,
+                baseCarbG: record["baseCarbG"] as? Double,
+                baseFatG: record["baseFatG"] as? Double
+            ))
         }
         return byMeal
     }

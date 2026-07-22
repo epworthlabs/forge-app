@@ -27,6 +27,30 @@ struct FoodEntry: Identifiable, Equatable, Codable {
     var proteinG: Int
     var carbG: Int
     var fatG: Int
+    // Feature request — "give them the ability to edit their serving quantity whether it be in g,
+    // oz, or # of servings... macros and calories should update automatically." `quantity`/`unit`/
+    // `referenceGrams` reproduce the same multiplier `PortionConfirmSheet` used when this was
+    // first logged; `base*` are the food's macros at multiplier 1. Editing the serving size can
+    // then rescale kcal/proteinG/carbG/fatG the same way logging did, instead of the user typing
+    // raw macro numbers. All defaulted so entries logged before this existed still decode fine —
+    // see `effectiveBase*` below for how those fall back gracefully.
+    var quantity: Double = 1
+    var unit: PortionUnit = .servings
+    var referenceGrams: Double? = nil
+    var baseKcal: Double? = nil
+    var baseProteinG: Double? = nil
+    var baseCarbG: Double? = nil
+    var baseFatG: Double? = nil
+}
+
+extension FoodEntry {
+    // A pre-existing entry with no recorded base macros behaves as "1 serving = today's stored
+    // macros" — still rescalable by serving count (quantity defaults to 1, unit to .servings),
+    // just without a gram reference to offer g/oz editing against.
+    var effectiveBaseKcal: Double { baseKcal ?? Double(kcal) }
+    var effectiveBaseProteinG: Double { baseProteinG ?? Double(proteinG) }
+    var effectiveBaseCarbG: Double { baseCarbG ?? Double(carbG) }
+    var effectiveBaseFatG: Double { baseFatG ?? Double(fatG) }
 }
 
 enum Meal: String, CaseIterable, Identifiable, Codable {
@@ -109,6 +133,36 @@ final class AppStore: ObservableObject {
 
     // FRG-302 — recent/frequent foods, capped and deduped by name+brand, most-recent first.
     @Published private(set) var recentFoods: [FoodSearchResult] = []
+
+    // Feature request — "let users see a list of favourite foods whenever they go to add to their
+    // meals... users should also be able to edit that favourites list." Unlike `recentFoods` (an
+    // implicit MRU list, session-scoped and rebuilt from logging), favorites are an explicit user
+    // choice — expected to survive relaunch, so this is UserDefaults-backed (same local-only
+    // pattern as `restDurationSeconds` above) rather than living only in memory.
+    @Published private(set) var favoriteFoods: [FoodSearchResult] = {
+        guard let data = UserDefaults.standard.data(forKey: "favoriteFoods"),
+              let decoded = try? JSONDecoder().decode([FoodSearchResult].self, from: data) else { return [] }
+        return decoded
+    }() {
+        didSet {
+            if let data = try? JSONEncoder().encode(favoriteFoods) {
+                UserDefaults.standard.set(data, forKey: "favoriteFoods")
+            }
+        }
+    }
+
+    func isFavoriteFood(_ food: FoodSearchResult) -> Bool {
+        favoriteFoods.contains { $0.name == food.name && $0.brand == food.brand }
+    }
+
+    func toggleFavoriteFood(_ food: FoodSearchResult) {
+        if isFavoriteFood(food) {
+            favoriteFoods.removeAll { $0.name == food.name && $0.brand == food.brand }
+        } else {
+            favoriteFoods.insert(food, at: 0)
+        }
+    }
+
     let foodSearchService = FoodSearchService(credentials: Secrets.foodDatabaseCredentials, countryFilter: Secrets.foodDatabaseCountryFilter)
 
     init(profile: UserProfile, program: ProgramTemplate, savedPrograms: [ProgramTemplate] = [], startingDayIndex: Int = 0, programStartDate: Date = Date()) {
@@ -314,13 +368,19 @@ final class AppStore: ObservableObject {
                 entries.reduce(0) { $0 + $1.carbG }, entries.reduce(0) { $0 + $1.fatG })
     }
 
-    func logFood(_ result: FoodSearchResult, to meal: Meal) {
+    // `quantity`/`unit`/`referenceGrams` are the portion actually chosen in PortionConfirmSheet;
+    // `result`'s own kcal/proteinG/carbG/fatG are the food's *base* macros (at multiplier 1), kept
+    // so the entry can be rescaled later instead of only ever storing the already-scaled numbers.
+    func logFood(_ result: FoodSearchResult, quantity: Double, unit: PortionUnit, referenceGrams: Double?, to meal: Meal) {
+        let multiplier = PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: referenceGrams)
         let entry = FoodEntry(
             name: result.name,
-            kcal: result.kcal,
-            proteinG: Int(result.proteinG.rounded()),
-            carbG: Int(result.carbG.rounded()),
-            fatG: Int(result.fatG.rounded())
+            kcal: Int((Double(result.kcal) * multiplier).rounded()),
+            proteinG: Int((result.proteinG * multiplier).rounded()),
+            carbG: Int((result.carbG * multiplier).rounded()),
+            fatG: Int((result.fatG * multiplier).rounded()),
+            quantity: quantity, unit: unit, referenceGrams: referenceGrams,
+            baseKcal: Double(result.kcal), baseProteinG: result.proteinG, baseCarbG: result.carbG, baseFatG: result.fatG
         )
         mealEntries[meal, default: []].append(entry)
 
@@ -334,15 +394,21 @@ final class AppStore: ObservableObject {
         Task { await SyncQueue.shared.enqueue(.foodEntry(entry: entry, meal: meal)) }
     }
 
-    // Feature request — "the foods logged also need to be editable and deletable."
-    func updateFoodEntry(id: FoodEntry.ID, in meal: Meal, name: String, kcal: Int, proteinG: Int, carbG: Int, fatG: Int) {
+    // Feature request — "scrap the current editing flow... give them the ability to edit their
+    // serving quantity... macros and calories should update automatically." Replaces the old
+    // raw-numeric macro editor: recomputes kcal/proteinG/carbG/fatG from the entry's base macros
+    // every time, rather than accepting them as separately typed numbers.
+    func updateFoodEntryPortion(id: FoodEntry.ID, in meal: Meal, name: String, quantity: Double, unit: PortionUnit) {
         guard let index = mealEntries[meal]?.firstIndex(where: { $0.id == id }) else { return }
         var updated = mealEntries[meal]![index]
+        let multiplier = PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: updated.referenceGrams)
         updated.name = name
-        updated.kcal = kcal
-        updated.proteinG = proteinG
-        updated.carbG = carbG
-        updated.fatG = fatG
+        updated.quantity = quantity
+        updated.unit = unit
+        updated.kcal = Int((updated.effectiveBaseKcal * multiplier).rounded())
+        updated.proteinG = Int((updated.effectiveBaseProteinG * multiplier).rounded())
+        updated.carbG = Int((updated.effectiveBaseCarbG * multiplier).rounded())
+        updated.fatG = Int((updated.effectiveBaseFatG * multiplier).rounded())
         mealEntries[meal]![index] = updated
         Task { await SyncQueue.shared.enqueue(.foodEntry(entry: updated, meal: meal)) }
     }

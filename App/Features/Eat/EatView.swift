@@ -5,6 +5,29 @@ struct EatView: View {
     @State private var searchingMeal: Meal?
     @State private var collapsedMeals: Set<Meal> = []
 
+    // Feature request — "allow users to go back and view their food logs from previous days."
+    // 0 = today (the live, fully-editable in-memory state everything else already used); anything
+    // else is a read-only historical snapshot fetched from CloudKit — logging/editing/deleting stays
+    // scoped to today, since past days are for review, not retroactive editing.
+    @State private var dayOffset = 0
+    @State private var historicalEntries: [Meal: [FoodEntry]]?
+
+    private var viewingDate: Date {
+        Calendar.current.date(byAdding: .day, value: dayOffset, to: Date()) ?? Date()
+    }
+    private var isToday: Bool { dayOffset == 0 }
+
+    private var displayedEntries: [Meal: [FoodEntry]] {
+        isToday ? store.mealEntries : (historicalEntries ?? [:])
+    }
+
+    private var displayedTotals: (kcal: Int, protein: Int, carb: Int, fat: Int) {
+        guard !isToday else { return store.totals() }
+        let entries = Meal.allCases.flatMap { displayedEntries[$0] ?? [] }
+        return (entries.reduce(0) { $0 + $1.kcal }, entries.reduce(0) { $0 + $1.proteinG },
+                entries.reduce(0) { $0 + $1.carbG }, entries.reduce(0) { $0 + $1.fatG })
+    }
+
     var body: some View {
         ZStack {
             ForgeColors.backgroundWash
@@ -13,17 +36,27 @@ struct EatView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Eat").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
                         Spacer()
-                        Text(Date(), style: .date).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    }
+
+                    HStack(spacing: 10) {
+                        IconButton(systemName: "chevron.left", action: { dayOffset -= 1 }, size: 32)
+                        Text(isToday ? "Today" : Self.dateLabel(viewingDate))
+                            .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                            .frame(maxWidth: .infinity)
+                        IconButton(systemName: "chevron.right", action: { dayOffset += 1 }, size: 32)
+                            .disabled(isToday)
+                            .opacity(isToday ? 0.4 : 1)
                     }
 
                     let target = store.nutritionTarget
-                    let totals = store.totals()
+                    let totals = displayedTotals
                     GlassCard {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Text("REMAINING").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                                Text(isToday ? "REMAINING" : "LOGGED").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
                                 Spacer()
-                                Text("\(max(0, Int(target.calories) - totals.kcal)) kcal").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+                                Text(isToday ? "\(max(0, Int(target.calories) - totals.kcal)) kcal" : "\(totals.kcal) kcal")
+                                    .font(ForgeType.title).foregroundStyle(ForgeColors.ink)
                             }
                             EatMacroRow(label: "Protein", current: totals.protein, target: Int(target.proteinG))
                             EatMacroRow(label: "Carbs", current: totals.carb, target: Int(target.carbG))
@@ -39,7 +72,7 @@ struct EatView: View {
 
                     ForEach(Meal.allCases) { meal in
                         let isCollapsed = collapsedMeals.contains(meal)
-                        let entries = store.mealEntries[meal] ?? []
+                        let entries = displayedEntries[meal] ?? []
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Button {
@@ -62,13 +95,19 @@ struct EatView: View {
                                 }
                                 .buttonStyle(.plain)
                                 Spacer()
-                                Button("+ Add") { searchingMeal = meal }
-                                    .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
-                                    .padding(.horizontal, 10).frame(minHeight: 44)
+                                if isToday {
+                                    Button("+ Add") { searchingMeal = meal }
+                                        .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
+                                        .padding(.horizontal, 10).frame(minHeight: 44)
+                                }
                             }
                             if !isCollapsed {
                                 ForEach(entries) { entry in
-                                    FoodEntryRow(meal: meal, entry: entry)
+                                    if isToday {
+                                        FoodEntryRow(meal: meal, entry: entry)
+                                    } else {
+                                        ReadOnlyFoodEntryRow(entry: entry)
+                                    }
                                 }
                             }
                         }
@@ -78,9 +117,44 @@ struct EatView: View {
                 .padding(.bottom, 90)
             }
         }
+        .task(id: dayOffset) {
+            guard !isToday else { historicalEntries = nil; return }
+            let start = Calendar.current.startOfDay(for: viewingDate)
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? viewingDate
+            historicalEntries = try? await CloudKitStore.shared.fetchFoodEntries(from: start, to: end)
+        }
         .sheet(item: $searchingMeal) { meal in
             FoodSearchView(meal: meal)
         }
+    }
+
+    private static func dateLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d"
+        return formatter.string(from: date)
+    }
+}
+
+/// Read-only row for a past day's entry — no swipe-to-delete, no tap-to-edit, since browsing
+/// history isn't an editing surface (only today's diary is).
+private struct ReadOnlyFoodEntryRow: View {
+    let entry: FoodEntry
+
+    var body: some View {
+        HStack(spacing: 10) {
+            FoodMonogram(name: entry.name).frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                Text("\(entry.proteinG)g P · \(entry.carbG)g C · \(entry.fatG)g F")
+                    .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            }
+            Spacer()
+            Text("\(entry.kcal)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+        }
+        .padding(.vertical, 4).padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -169,10 +243,12 @@ private struct FoodEntryRow: View {
     }
 }
 
-/// Direct numeric edit of an already-logged entry's final values — `FoodEntry` only stores the
-/// resolved macros, not the original food-database item or portion multiplier that produced them,
-/// so there's nothing to reopen a portion-scaling flow against. Editing the numbers directly is
-/// the honest match for what's actually stored.
+/// Feature request — "scrap the current editing flow for when users go into edit specific meals.
+/// Can we give them the ability to edit their serving quantity whether it be in g, oz, or # of
+/// servings? After editing that, the macros and calories should update automatically." Replaces
+/// the old raw-numeric macro editor (FRG-358) with the same quantity+unit scaling
+/// `PortionConfirmSheet` uses when a food is first logged — editing the serving size recomputes
+/// kcal/protein/carb/fat instead of typing them directly.
 private struct FoodEntryEditSheet: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -180,20 +256,30 @@ private struct FoodEntryEditSheet: View {
     let entry: FoodEntry
 
     @State private var name: String
-    @State private var kcal: Int
-    @State private var proteinG: Int
-    @State private var carbG: Int
-    @State private var fatG: Int
+    @State private var unit: PortionUnit
+    @State private var quantityText: String
+    @FocusState private var quantityFocused: Bool
+    @State private var quantityBeforeFocus: String = ""
 
     init(meal: Meal, entry: FoodEntry) {
         self.meal = meal
         self.entry = entry
         _name = State(initialValue: entry.name)
-        _kcal = State(initialValue: entry.kcal)
-        _proteinG = State(initialValue: entry.proteinG)
-        _carbG = State(initialValue: entry.carbG)
-        _fatG = State(initialValue: entry.fatG)
+        _unit = State(initialValue: entry.unit)
+        _quantityText = State(initialValue: Self.trimmedDecimal(entry.quantity))
     }
+
+    // Only offer grams/ounces when this entry actually has a gram reference to scale against —
+    // same fallback as PortionConfirmSheet, and true for every legacy entry logged before this.
+    private var availableUnits: [PortionUnit] { entry.referenceGrams != nil ? [.g, .oz, .servings] : [.servings] }
+
+    private var quantity: Double { Double(quantityText) ?? 0 }
+    private var multiplier: Double { PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: entry.referenceGrams) }
+
+    private var scaledKcal: Int { Int((entry.effectiveBaseKcal * multiplier).rounded()) }
+    private var scaledProtein: Double { entry.effectiveBaseProteinG * multiplier }
+    private var scaledCarb: Double { entry.effectiveBaseCarbG * multiplier }
+    private var scaledFat: Double { entry.effectiveBaseFatG * multiplier }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -207,29 +293,39 @@ private struct FoodEntryEditSheet: View {
                 .background(ForgeColors.tileBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            HStack {
-                Text("Calories").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                Spacer()
-                NumpadField(value: $kcal, maxDigits: 4, range: 0...9999)
+            HStack(spacing: 10) {
+                TextField("Amount", text: $quantityText)
+                    .keyboardType(.decimalPad)
+                    .font(ForgeType.title)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .frame(width: 90)
+                    .background(ForgeColors.tileBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .focused($quantityFocused)
+                    .onChange(of: quantityFocused) { focused in
+                        if focused {
+                            quantityBeforeFocus = quantityText
+                            quantityText = ""
+                        } else if quantityText.isEmpty {
+                            quantityText = quantityBeforeFocus
+                        }
+                    }
+
+                Picker("Unit", selection: $unit) {
+                    ForEach(availableUnits, id: \.self) { u in Text(u.rawValue).tag(u) }
+                }
+                .pickerStyle(.segmented)
             }
-            HStack {
-                Text("Protein").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                Spacer()
-                NumpadField(value: $proteinG, maxDigits: 3, range: 0...999, suffix: "g")
-            }
-            HStack {
-                Text("Carbs").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                Spacer()
-                NumpadField(value: $carbG, maxDigits: 3, range: 0...999, suffix: "g")
-            }
-            HStack {
-                Text("Fat").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                Spacer()
-                NumpadField(value: $fatG, maxDigits: 3, range: 0...999, suffix: "g")
+
+            HStack(spacing: 10) {
+                PortionMacroTile(label: "kcal", value: "\(scaledKcal)")
+                PortionMacroTile(label: "Protein", value: "\(Int(scaledProtein.rounded()))g")
+                PortionMacroTile(label: "Carbs", value: "\(Int(scaledCarb.rounded()))g")
+                PortionMacroTile(label: "Fat", value: "\(Int(scaledFat.rounded()))g")
             }
 
             Button {
-                store.updateFoodEntry(id: entry.id, in: meal, name: name, kcal: kcal, proteinG: proteinG, carbG: carbG, fatG: fatG)
+                store.updateFoodEntryPortion(id: entry.id, in: meal, name: name, quantity: quantity, unit: unit)
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
@@ -237,11 +333,19 @@ private struct FoodEntryEditSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-            .opacity(name.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0)
+            .opacity(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0 ? 0.5 : 1)
         }
         .padding(22)
         .presentationDetents([.medium])
+        .dismissKeyboardOnTap()
+    }
+
+    private static func trimmedDecimal(_ value: Double) -> String {
+        var text = String(format: "%.2f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text
     }
 }
 

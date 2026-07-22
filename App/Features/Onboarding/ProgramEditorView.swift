@@ -52,6 +52,7 @@ struct ProgramEditorView: View {
         NavigationStack {
             ZStack {
                 ForgeColors.backgroundWash
+                    .dismissKeyboardOnTap()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         TextField("Program name", text: $programName)
@@ -300,7 +301,6 @@ private struct NumberField: View {
                 .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
                 .frame(width: 44)
                 .focused($isFocused)
-                .numpadDoneButton(isFocused: $isFocused)
                 .onAppear { text = String(value) }
                 .onChange(of: value) { newValue in
                     if !isFocused { text = String(newValue) }

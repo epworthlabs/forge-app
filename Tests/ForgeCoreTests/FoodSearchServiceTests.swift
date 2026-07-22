@@ -191,7 +191,8 @@ private let openFoodFactsNotFoundFixture = Data(#"{"status": 0}"#.utf8)
             fatSecretProxySharedSecret: "secret"
         )
         let service = FoodSearchService(
-            credentials: credentials, session: MockURLProtocol.makeSession(), sourceTimeout: .milliseconds(50)
+            credentials: credentials, session: MockURLProtocol.makeSession(),
+            sourceTimeout: .milliseconds(50), fatSecretTimeout: .milliseconds(50)
         )
 
         let start = ContinuousClock.now
@@ -203,5 +204,24 @@ private let openFoodFactsNotFoundFixture = Data(#"{"status": 0}"#.utf8)
         #expect(elapsed < .milliseconds(250))
         #expect(!results.contains { $0.source == .fatSecret })
         #expect(results.count == 2) // USDA + Open Food Facts still came back
+    }
+
+    // Feature request — "make searching for food items even more robust." Repeating (or
+    // re-casing/re-whitespacing) an already-searched query should return instantly from the
+    // in-memory cache rather than re-hitting every source from scratch.
+    @Test func repeatedQueryHitsCacheNotNetwork() async throws {
+        MockURLProtocol.stub(urlContains: "api.nal.usda.gov", data: usdaFixture)
+        MockURLProtocol.stub(urlContains: "search.pl", data: openFoodFactsFixture)
+        MockURLProtocol.resetRequestCounts()
+        let credentials = FoodDatabaseCredentials(usdaAPIKey: "DEMO_KEY")
+        let service = FoodSearchService(credentials: credentials, session: MockURLProtocol.makeSession())
+
+        _ = await service.search(query: "chicken")
+        let firstCount = MockURLProtocol.requestCounts["api.nal.usda.gov"] ?? 0
+        _ = await service.search(query: "  Chicken  ") // same query, different case/whitespace
+        let secondCount = MockURLProtocol.requestCounts["api.nal.usda.gov"] ?? 0
+
+        #expect(firstCount == 1)
+        #expect(secondCount == 1) // no second network hit — served from cache
     }
 }

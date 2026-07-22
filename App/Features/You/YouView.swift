@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ForgeCore
 
 struct YouView: View {
@@ -10,6 +11,9 @@ struct YouView: View {
     @State private var showingMethodology = false
     @State private var editingGoalTarget = false
     @State private var editingProfile = false
+    @State private var isPreparingExport = false
+    @State private var exportedFiles: [URL] = []
+    @State private var showingExportSheet = false
 
     var body: some View {
         ZStack {
@@ -103,14 +107,32 @@ struct YouView: View {
                             .buttonStyle(.plain)
                             Divider().overlay(ForgeColors.cardBorder)
 
-                            ShareLink(items: CSVExporter.exportFiles(store: store)) {
+                            // Feature request — "I want it to contain weight, workout and food log
+                            // data" (full history, not just today) — nutrition now requires an
+                            // async CloudKit fetch (see CSVExporter), so this is a Button that
+                            // prepares the files first rather than a ShareLink handed a
+                            // synchronously-computed array.
+                            Button {
+                                isPreparingExport = true
+                                Task {
+                                    exportedFiles = await CSVExporter.exportFiles(store: store)
+                                    isPreparingExport = false
+                                    showingExportSheet = true
+                                }
+                            } label: {
                                 HStack {
                                     Text("Export data (CSV)").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                                     Spacer()
-                                    Image(systemName: "square.and.arrow.up").foregroundStyle(ForgeColors.inkMuted).font(.body)
+                                    if isPreparingExport {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "square.and.arrow.up").foregroundStyle(ForgeColors.inkMuted).font(.body)
+                                    }
                                 }
                                 .padding(.vertical, 13)
                             }
+                            .buttonStyle(.plain)
+                            .disabled(isPreparingExport)
                         }
                     }
 
@@ -129,12 +151,26 @@ struct YouView: View {
         .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
         .sheet(isPresented: $editingGoalTarget) { GoalTargetEditSheet() }
         .sheet(isPresented: $editingProfile) { ProfileEditSheet() }
+        .sheet(isPresented: $showingExportSheet) { ActivityShareSheet(items: exportedFiles) }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than
             // only right after the toggle flips.
             if healthSyncEnabled { await store.syncHealthKit() }
         }
     }
+}
+
+/// `ShareLink` needs its items known synchronously at view-body time; the CSV export now requires
+/// an async CloudKit fetch first (full nutrition history, not just today), so this wraps the plain
+/// UIKit share sheet instead, presented once the files are actually ready.
+private struct ActivityShareSheet: UIViewControllerRepresentable {
+    let items: [URL]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private struct SettingsRow: View {
