@@ -4,6 +4,12 @@ import ForgeCore
 struct TodayView: View {
     @EnvironmentObject var store: AppStore
     @Binding var selectedTab: MainTab
+    @State private var reviewingSession = false
+
+    private var todaysCompletedSession: WorkoutSession? {
+        guard let session = store.lastCompletedSession, Calendar.current.isDateInToday(session.date) else { return nil }
+        return session
+    }
 
     var body: some View {
         ZStack {
@@ -26,24 +32,18 @@ struct TodayView: View {
                     let target = store.nutritionTarget
                     let totals = store.totals()
 
+                    // Feature request — "get rid of adjustments that happen to calorie amounts
+                    // after training... calorie amounts were not supposed to change." Target is
+                    // now fixed by activity level + goal + weekly recalibration only, so there's
+                    // no more per-day "adjusted for training" state to show here.
                     Button { store.sheetPresented = true } label: {
                         GlassCard(cornerRadius: 28) {
                             VStack(alignment: .leading, spacing: 0) {
-                                if target.calorieAdjustment != 0 {
-                                    HStack(spacing: 8) {
-                                        Circle().fill(ForgeColors.accent).frame(width: 7, height: 7)
-                                        Text("Adjusted for today's training")
-                                            .font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
-                                    }
+                                Text("NUTRITION TARGET").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
                                     .padding(.bottom, 10)
-                                } else {
-                                    Text("NUTRITION TARGET").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-                                        .padding(.bottom, 10)
-                                }
 
                                 HStack(spacing: 12) {
-                                    LiquidTile(label: "Calories", value: "\(Int(target.calories))",
-                                               delta: target.calorieAdjustment != 0 ? signedInt(target.calorieAdjustment) + " today" : nil)
+                                    LiquidTile(label: "Calories", value: "\(Int(target.calories))")
                                     LiquidTile(label: "Protein", value: "\(Int(target.proteinG))g")
                                 }
                             }
@@ -52,15 +52,34 @@ struct TodayView: View {
                     }
                     .buttonStyle(.plain)
 
-                    if store.hasTrainingHistory {
-                        HStack(spacing: 14) {
-                            let doneSets = store.todaysExercises.flatMap(\.sets).filter(\.done).count
-                            let totalSets = store.todaysExercises.flatMap(\.sets).count
-                            RingStat(label: "Sets logged", value: "\(doneSets)/\(totalSets)",
-                                     progress: totalSets > 0 ? Double(doneSets) / Double(totalSets) : 0, color: ForgeColors.accent)
-                            RingStat(label: "kcal eaten", value: "\(totals.kcal)",
-                                     progress: target.calories > 0 ? min(1.0, Double(totals.kcal) / target.calories) : 0, color: ForgeColors.accent2)
+                    // Feature request — "get rid of the ring called sets logged, instead, when
+                    // user completes their workout, give them a checkbox that denotes that todays
+                    // workout is complete and if they tap, allow them to review the workout."
+                    if let session = todaysCompletedSession {
+                        Button { reviewingSession = true } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 22)).foregroundStyle(ForgeColors.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Today's workout complete").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                    Text("Tap to review").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                            }
+                            .padding(16)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
+                        .buttonStyle(.plain)
+                        .sheet(isPresented: $reviewingSession) {
+                            NavigationStack { SessionReviewView(session: session) }
+                        }
+                    }
+
+                    if store.hasTrainingHistory {
+                        RingStat(label: "kcal eaten", value: "\(totals.kcal)",
+                                 progress: target.calories > 0 ? min(1.0, Double(totals.kcal) / target.calories) : 0, color: ForgeColors.accent2)
                     }
 
                     GlassCard {
@@ -98,10 +117,5 @@ struct TodayView: View {
             }
         }
         .sheet(isPresented: $store.sheetPresented) { TargetExplanationSheet() }
-    }
-
-    private func signedInt(_ value: Double) -> String {
-        let sign = value >= 0 ? "+" : ""
-        return "\(sign)\(Int(value))"
     }
 }

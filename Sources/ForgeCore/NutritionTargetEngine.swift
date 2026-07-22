@@ -8,29 +8,22 @@ public struct NutritionTarget: Sendable, Equatable {
 
     // Explainability breakdown for the Target Explanation sheet (PRD FRG-207/211).
     public var baselineMaintenanceCalories: Double
-    public var loadScore: Double
-    public var calorieAdjustment: Double
     public var redSFloorApplied: Bool
     /// FRG-301 — weekly weight-trend recalibration already folded into this baseline; broken out
-    /// separately here so the explanation sheet can show it as its own line, distinct from today's
-    /// Load Score swing.
+    /// separately here so the explanation sheet can show it as its own line.
     public var weeklyRecalibrationKcal: Double
 }
 
 public enum NutritionTargetEngine {
-    /// How aggressively calories swing with Load Score. Not a cited literature value — a product
-    /// tuning knob (PRD Appendix step 3), calibrated here to roughly match the design prototype's
-    /// worked example (2,500 kcal baseline, 1.4× Load Score → +180 kcal) pending real usage data.
-    public static var k: Double = 0.18
-
+    // Feature request — "get rid of adjustments that happen to calorie amounts after training...
+    // the calorie amounts were not supposed to change." Calories are now fixed by activity level
+    // (via TDEECalculator's activity multiplier, set at onboarding) + goal + weekly recalibration
+    // only. `loadScore` is kept as a parameter purely for `carbBand` below — a separate mechanic
+    // (today's macro *split*, not the calorie total) that wasn't part of this request — so this
+    // no longer needs its own daily-swing tuning constant.
     public static func calculate(profile: UserProfile, loadScore: Double, weeklyRecalibrationKcal: Double = 0) -> NutritionTarget {
-        // FRG-301 — weekly recalibration shifts the baseline itself; Load Score's daily swing
-        // then applies on top of that shifted baseline, per the PRD's "layer on top of" framing.
         let tdeeGoal = TDEECalculator.goalAdjustedTDEE(profile) + weeklyRecalibrationKcal
-
-        let rawAdjustment = tdeeGoal * k * (loadScore - 1.0)
-        let clippedAdjustment = max(-0.25 * tdeeGoal, min(0.25 * tdeeGoal, rawAdjustment))
-        let candidateCalories = tdeeGoal + clippedAdjustment
+        let candidateCalories = tdeeGoal
 
         // RED-S floor: intake must never imply Energy Availability < 30 kcal/kg fat-free mass.
         // Deliberately NOT (TDEE_goal - BMR) here — that delta includes general daily activity via
@@ -48,8 +41,8 @@ public enum NutritionTargetEngine {
         let fatG: Double
         if let proteinPct = profile.manualProteinPercent, let carbPct = profile.manualCarbPercent, let fatPct = profile.manualFatPercent {
             // Feature request — "adjust the target macro splits manually if needed." A percentage
-            // split of whatever the total is, so it still scales with the daily Load Score swing
-            // instead of pinning fixed gram targets against a calorie total that moves day to day.
+            // split of whatever the total is (rather than fixed grams), so it still tracks
+            // correctly if weekly recalibration shifts the baseline over time.
             proteinG = (finalCalories * proteinPct) / 4
             carbG = (finalCalories * carbPct) / 4
             fatG = (finalCalories * fatPct) / 9
@@ -81,8 +74,6 @@ public enum NutritionTargetEngine {
             carbG: carbG,
             fatG: fatG,
             baselineMaintenanceCalories: TDEECalculator.maintenanceTDEE(profile),
-            loadScore: loadScore,
-            calorieAdjustment: finalCalories - tdeeGoal,
             redSFloorApplied: floorApplied,
             weeklyRecalibrationKcal: weeklyRecalibrationKcal
         )

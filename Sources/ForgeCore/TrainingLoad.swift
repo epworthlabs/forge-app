@@ -22,13 +22,25 @@ public struct SetLog: Sendable, Codable {
     var effortFactor: Double { (rpe ?? 8) / 10 }
 }
 
-public struct WorkoutSession: Sendable, Codable {
+public struct WorkoutSession: Sendable, Codable, Identifiable {
+    public var id = UUID()
     public var date: Date
     public var sets: [SetLog]
+    /// Feature request — "if the user completed one of the workouts for the week in a specific
+    /// training program, denote that... workout was completed for the week... suggest the next
+    /// workout depending on the week and what has already been done." Previously nothing recorded
+    /// *which* program day/week a session was for, so there was no way to answer "which of this
+    /// week's days have I done" from history alone. Both optional/additive — old sessions logged
+    /// before this simply won't have them and are excluded from per-week completion tracking,
+    /// same graceful-fallback pattern as every other additive field in this app.
+    public var programDayIndex: Int?
+    public var programWeek: Int?
 
-    public init(date: Date, sets: [SetLog]) {
+    public init(date: Date, sets: [SetLog], programDayIndex: Int? = nil, programWeek: Int? = nil) {
         self.date = date
         self.sets = sets
+        self.programDayIndex = programDayIndex
+        self.programWeek = programWeek
     }
 
     /// Σ(sets × reps × weight × RPE/10) — PRD Appendix step 2.

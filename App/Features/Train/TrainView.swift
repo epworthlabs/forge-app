@@ -20,8 +20,8 @@ struct TrainView: View {
                 switch route {
                 case .daySelection:
                     DaySelectionView(
-                        onSelectDay: { index in
-                            store.selectDay(index)
+                        onSelectDay: { index, week in
+                            store.selectDay(index, week: week)
                             path.append(.session)
                         },
                         onReview: { path.append(.review) }
@@ -31,7 +31,9 @@ struct TrainView: View {
                         showingCompleteScreen = true
                     }
                 case .review:
-                    SessionReviewView()
+                    if let session = store.lastCompletedSession {
+                        SessionReviewView(session: session)
+                    }
                 }
             }
         }

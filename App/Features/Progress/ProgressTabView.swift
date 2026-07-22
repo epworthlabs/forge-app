@@ -114,7 +114,7 @@ struct ProgressTabView: View {
                     // Feature request — "don't make the workout calendar collapsable, keep it
                     // fixed." Always visible, unlike Lift Progression above.
                     GlassCard {
-                        WorkoutCalendarView(sessionDates: store.trailingSessions.map(\.date))
+                        WorkoutCalendarView(sessions: store.trailingSessions)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -187,8 +187,11 @@ private struct LogWeightSheet: View {
 /// Feature request — a month at a glance, marking the days a workout was completed. `sessionDates`
 /// comes straight from `trailingSessions`; days are matched by calendar day, not exact timestamp.
 private struct WorkoutCalendarView: View {
-    let sessionDates: [Date]
+    let sessions: [WorkoutSession]
     @State private var displayedMonth = Date()
+    // Feature request — "when user clicks a day they worked out, allow them to review the
+    // workout they logged that day."
+    @State private var reviewingSession: WorkoutSession?
 
     private let calendar = Calendar.current
     private let columns = Array(repeating: GridItem(.flexible()), count: 7)
@@ -211,19 +214,31 @@ private struct WorkoutCalendarView: View {
                 }
                 ForEach(Array(daysGrid.enumerated()), id: \.offset) { _, day in
                     if let day {
-                        let trained = trainedDayNumbers.contains(calendar.component(.day, from: day))
-                        Text("\(calendar.component(.day, from: day))")
-                            .font(ForgeType.caption)
-                            .foregroundStyle(trained ? Color.white : ForgeColors.inkMuted)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 26)
-                            .background(trained ? ForgeColors.accent : Color.clear)
-                            .clipShape(Circle())
+                        let daySessions = sessions(on: day)
+                        Button {
+                            guard !daySessions.isEmpty else { return }
+                            // Combine same-day sessions (rare, but possible) into one for review
+                            // rather than arbitrarily picking just the first.
+                            reviewingSession = WorkoutSession(date: day, sets: daySessions.flatMap(\.sets))
+                        } label: {
+                            Text("\(calendar.component(.day, from: day))")
+                                .font(ForgeType.caption)
+                                .foregroundStyle(daySessions.isEmpty ? ForgeColors.inkMuted : Color.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 26)
+                                .background(daySessions.isEmpty ? Color.clear : ForgeColors.accent)
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(daySessions.isEmpty)
                     } else {
                         Color.clear.frame(height: 26)
                     }
                 }
             }
+        }
+        .sheet(item: $reviewingSession) { session in
+            NavigationStack { SessionReviewView(session: session) }
         }
     }
 
@@ -243,16 +258,9 @@ private struct WorkoutCalendarView: View {
         return Array(symbols[startIndex...] + symbols[..<startIndex])
     }
 
-    /// Every `sessionDates` day-of-month that falls within `displayedMonth`'s year+month —
-    /// intentionally not full `Date` equality, since a calendar cell only knows the day number.
-    private var trainedDayNumbers: Set<Int> {
-        let targetMonth = calendar.component(.month, from: displayedMonth)
-        let targetYear = calendar.component(.year, from: displayedMonth)
-        return Set(sessionDates.compactMap { date -> Int? in
-            let comps = calendar.dateComponents([.year, .month, .day], from: date)
-            guard comps.year == targetYear, comps.month == targetMonth else { return nil }
-            return comps.day
-        })
+    /// Every session logged on the same calendar day as `day`.
+    private func sessions(on day: Date) -> [WorkoutSession] {
+        sessions.filter { calendar.isDate($0.date, inSameDayAs: day) }
     }
 
     private var daysGrid: [Date?] {

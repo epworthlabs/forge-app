@@ -95,6 +95,11 @@ actor CloudKitStore {
         let record = CKRecord(recordType: "WorkoutSession")
         record["date"] = session.date
         record["setsJSON"] = try JSONEncoder().encode(session.sets)
+        // Additive — see WorkoutSession's doc comment. nil values simply aren't written; CloudKit
+        // records don't store explicit nulls, so this reads back the same as an old record that
+        // predates these fields entirely.
+        if let programDayIndex = session.programDayIndex { record["programDayIndex"] = programDayIndex }
+        if let programWeek = session.programWeek { record["programWeek"] = programWeek }
         _ = try await database.save(record)
     }
 
@@ -107,7 +112,11 @@ actor CloudKitStore {
                   let setsData = record["setsJSON"] as? Data,
                   let sets = try? JSONDecoder().decode([SetLog].self, from: setsData)
             else { return nil }
-            return WorkoutSession(date: date, sets: sets)
+            return WorkoutSession(
+                date: date, sets: sets,
+                programDayIndex: record["programDayIndex"] as? Int,
+                programWeek: record["programWeek"] as? Int
+            )
         }
     }
 

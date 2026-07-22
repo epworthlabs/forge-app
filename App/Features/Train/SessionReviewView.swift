@@ -1,16 +1,14 @@
 import SwiftUI
 import ForgeCore
 
-/// Feature request — "review the workout they just did." Reads `store.lastCompletedSession`
-/// directly rather than taking one as a parameter — there's only ever one "the workout I just
-/// did" at a time, and DaySelectionView only shows the entry point to this screen while it's set.
+/// Feature request — "review the workout they just did/logged that day." Originally read
+/// `store.lastCompletedSession` directly since there was only ever one reviewable session at a
+/// time; now takes an explicit session so it can review *any* historical session — today's from
+/// Today, or a specific past day's from Progress's calendar.
 struct SessionReviewView: View {
-    @EnvironmentObject var store: AppStore
-
-    private var session: WorkoutSession? { store.lastCompletedSession }
+    let session: WorkoutSession
 
     private var byExercise: [(name: String, sets: [SetLog])] {
-        guard let session else { return [] }
         var order: [String] = []
         var grouped: [String: [SetLog]] = [:]
         for set in session.sets {
@@ -25,9 +23,7 @@ struct SessionReviewView: View {
             ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    if let session {
-                        Text(session.date, style: .date).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                    }
+                    Text(session.date, style: .date).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
 
                     if byExercise.isEmpty {
                         Text("Nothing to review yet.").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)

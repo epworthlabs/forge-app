@@ -7,8 +7,15 @@ import ForgeCore
 /// the suggested next session; a review tile appears only while there's something to review.
 struct DaySelectionView: View {
     @EnvironmentObject var store: AppStore
-    var onSelectDay: (Int) -> Void
+    var onSelectDay: (Int, Int) -> Void
     var onReview: () -> Void
+
+    // Feature request — "allow users to traverse through multiple weeks, ex. week 1 of 12, week 4
+    // of 12." nil means "just show the real current week" — avoids needing `store` (an
+    // @EnvironmentObject, not available yet inside init) to seed this at construction time; only
+    // set once the user actually pages away from the current week.
+    @State private var manuallySelectedWeek: Int?
+    private var viewingWeek: Int { manuallySelectedWeek ?? store.currentProgramWeek }
 
     var body: some View {
         ZStack {
@@ -17,7 +24,15 @@ struct DaySelectionView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(store.program.name).font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
-                        Text("Week \(store.currentProgramWeek) of \(store.program.weekCount)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        HStack(spacing: 10) {
+                            IconButton(systemName: "chevron.left", action: { shiftWeek(by: -1) }, size: 32)
+                                .disabled(viewingWeek <= 1)
+                                .opacity(viewingWeek <= 1 ? 0.4 : 1)
+                            Text("Week \(viewingWeek) of \(store.program.weekCount)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                            IconButton(systemName: "chevron.right", action: { shiftWeek(by: 1) }, size: 32)
+                                .disabled(viewingWeek >= store.program.weekCount)
+                                .opacity(viewingWeek >= store.program.weekCount ? 0.4 : 1)
+                        }
                     }
 
                     if store.lastCompletedSession != nil {
@@ -37,15 +52,26 @@ struct DaySelectionView: View {
                         .buttonStyle(.plain)
                     }
 
-                    Text("This week").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
-                    let days = store.program.days(forWeek: store.currentProgramWeek)
+                    Text(viewingWeek == store.currentProgramWeek ? "This week" : "Week \(viewingWeek)")
+                        .font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                    let days = store.program.days(forWeek: viewingWeek)
                     if days.isEmpty {
                         Text("This program doesn't have any days set up yet.").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                     } else {
+                        // Feature request — "denote that specific workout was completed for the
+                        // week... suggest the next workout depending on the week and what has
+                        // already been done." Suggestion only makes sense for the real current
+                        // week — browsing a different week is for reference, not "what's next."
+                        let completed = store.completedDayIndices(forWeek: viewingWeek)
+                        let suggested = store.suggestedDayIndex(forWeek: viewingWeek)
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                             ForEach(Array(days.enumerated()), id: \.offset) { index, day in
-                                DayTile(day: day, isSuggested: index == store.currentProgramDayIndex) {
-                                    onSelectDay(index)
+                                DayTile(
+                                    day: day,
+                                    isSuggested: viewingWeek == store.currentProgramWeek && index == suggested,
+                                    isCompleted: completed.contains(index)
+                                ) {
+                                    onSelectDay(index, viewingWeek)
                                 }
                             }
                         }
@@ -58,18 +84,30 @@ struct DaySelectionView: View {
         .navigationTitle("This Week")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    private func shiftWeek(by delta: Int) {
+        manuallySelectedWeek = min(max(1, viewingWeek + delta), store.program.weekCount)
+    }
 }
 
 private struct DayTile: View {
     let day: ProgramDay
     let isSuggested: Bool
+    let isCompleted: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 6) {
-                if isSuggested {
-                    Text("SUGGESTED").font(ForgeType.label).foregroundStyle(Color.white.opacity(0.85))
+                HStack {
+                    if isSuggested {
+                        Text("SUGGESTED").font(ForgeType.label).foregroundStyle(Color.white.opacity(0.85))
+                    }
+                    Spacer()
+                    if isCompleted {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(isSuggested ? Color.white : ForgeColors.accent)
+                    }
                 }
                 Text(day.name).font(ForgeType.body).foregroundStyle(isSuggested ? Color.white : ForgeColors.ink).lineLimit(2)
                 Text("\(day.exercises.count) exercise\(day.exercises.count == 1 ? "" : "s")")

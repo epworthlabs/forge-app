@@ -44,23 +44,19 @@ func makeProfile(goal: Goal = .maintain) -> UserProfile {
         #expect(typical.proteinG == profile.weightKg * profile.goal.proteinPerKg)
     }
 
-    @Test func calorieAdjustmentScalesWithLoadScore() {
+    // Feature request — "get rid of adjustments that happen to calorie amounts after training...
+    // the calorie amounts were not supposed to change." Calories are fixed by activity level +
+    // goal + weekly recalibration only now; loadScore no longer swings the total (it still drives
+    // carbBand's macro split — see carbBandSelectionMatchesResearchedRanges below).
+    @Test func caloriesStayFixedAcrossLoadScores() {
         let profile = makeProfile()
+        let light = NutritionTargetEngine.calculate(profile: profile, loadScore: 0.1)
         let typical = NutritionTargetEngine.calculate(profile: profile, loadScore: 1.0)
-        let heavy = NutritionTargetEngine.calculate(profile: profile, loadScore: 1.4)
-        let light = NutritionTargetEngine.calculate(profile: profile, loadScore: 0.6)
+        let heavy = NutritionTargetEngine.calculate(profile: profile, loadScore: 10.0)
 
-        #expect(abs(typical.calorieAdjustment) < 0.01)
-        #expect(heavy.calorieAdjustment > 0)
-        #expect(light.calorieAdjustment < 0)
-    }
-
-    @Test func calorieAdjustmentClippedToTwentyFivePercent() {
-        let profile = makeProfile()
-        let extreme = NutritionTargetEngine.calculate(profile: profile, loadScore: 10.0)
-        let tdeeGoal = TDEECalculator.goalAdjustedTDEE(profile)
-
-        #expect(extreme.calories <= tdeeGoal * 1.25 + 0.01)
+        #expect(light.calories == typical.calories)
+        #expect(typical.calories == heavy.calories)
+        #expect(abs(typical.calories - TDEECalculator.goalAdjustedTDEE(profile)) < 0.01)
     }
 
     @Test func redSFloorNeverViolated() {

@@ -56,6 +56,13 @@ final class AppStore: ObservableObject {
     // scheduled deload week") can be computed without a separate week counter that could drift
     // out of sync with actual elapsed time.
     @Published var programStartDate: Date
+    // Feature request — "allow users to traverse through multiple weeks." Which week
+    // `todaysExercises` currently reflects — normally the real, date-derived `currentProgramWeek`,
+    // but can differ if the user browses to and selects a day from a different week (e.g.
+    // catching up on a week they skipped). Distinct from `currentProgramWeek` on purpose: deload
+    // scheduling stays tied to real calendar time regardless of which week you're actively
+    // training right now.
+    @Published private(set) var activeWeek: Int
 
     @Published var trailingSessions: [WorkoutSession] = []
     @Published var todaysExercises: [ExerciseSlot]
@@ -112,6 +119,7 @@ final class AppStore: ObservableObject {
         self.programStartDate = programStartDate
         self.bodyweightLogLb = [(Date(), profile.weightKg / 0.45359237)]
         let week = Self.week(fromStartDate: programStartDate)
+        self.activeWeek = week
         self.todaysExercises = Self.buildExerciseSlots(for: program, week: week, dayIndex: startingDayIndex)
         refreshLastPerformance()
     }
@@ -176,7 +184,8 @@ final class AppStore: ObservableObject {
     func updateProgram(_ newProgram: ProgramTemplate) {
         program = newProgram
         replaceInSavedPrograms(newProgram)
-        todaysExercises = Self.buildExerciseSlots(for: newProgram, week: currentProgramWeek, dayIndex: currentProgramDayIndex)
+        activeWeek = currentProgramWeek
+        todaysExercises = Self.buildExerciseSlots(for: newProgram, week: activeWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
         persistProfile()
     }
@@ -191,6 +200,7 @@ final class AppStore: ObservableObject {
         program = selected
         currentProgramDayIndex = 0
         programStartDate = Date()
+        activeWeek = 1
         todaysExercises = Self.buildExerciseSlots(for: selected, week: 1, dayIndex: 0)
         refreshLastPerformance()
         lastCompletedSession = nil
@@ -198,13 +208,35 @@ final class AppStore: ObservableObject {
     }
 
     // Feature request — DaySelectionView's explicit "do this day" choice, distinct from Finish
-    // Workout's automatic rotation to the next day in sequence.
-    func selectDay(_ index: Int) {
+    // Workout's automatic rotation to the next day in sequence. `week` defaults to the real
+    // current week, but DaySelectionView can pass a different one when the user has browsed to
+    // and picked a day from a week they're catching up on ("allow users to traverse through
+    // multiple weeks").
+    func selectDay(_ index: Int, week: Int? = nil) {
         currentProgramDayIndex = index
-        todaysExercises = Self.buildExerciseSlots(for: program, week: currentProgramWeek, dayIndex: index)
+        activeWeek = week ?? currentProgramWeek
+        todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: index)
         refreshLastPerformance()
         lastCompletedSession = nil
         persistProfile()
+    }
+
+    /// Feature request — "if the user completed one of the workouts for the week in a specific
+    /// training program, denote that specific workout was completed for the week." Which day
+    /// indices (within `week`) already have a logged session, so DayTile can show a completed
+    /// badge and the suggestion below can skip past them.
+    func completedDayIndices(forWeek week: Int) -> Set<Int> {
+        Set(trailingSessions.compactMap { $0.programWeek == week ? $0.programDayIndex : nil })
+    }
+
+    /// Feature request — "suggest the next workout depending on the week and what has already
+    /// been done during that week." First day this week not yet completed; if every day's done
+    /// (or the week has no days at all), falls back to day 0 rather than pointing nowhere.
+    func suggestedDayIndex(forWeek week: Int) -> Int {
+        let days = program.days(forWeek: week)
+        guard !days.isEmpty else { return 0 }
+        let done = completedDayIndices(forWeek: week)
+        return (0..<days.count).first { !done.contains($0) } ?? 0
     }
 
     // Feature request — "this figure should not change unless these settings are changed in the
@@ -259,11 +291,11 @@ final class AppStore: ObservableObject {
     }
 
     // FRG-305 — dampens today's Load Score if last night's sleep (from FRG-304's HealthKit read)
-    // was poor; never adds calories on its own, only pulls back an already-elevated day.
+    // was poor. Since Load Score no longer swings calories (see NutritionTargetEngine), this only
+    // affects carbBand's macro split now, not the calorie total.
     private var sleepAdjustedLoadScore: SleepModifier.Result {
         SleepModifier.dampen(loadScore: currentLoadScore, sleepHours: lastNightSleepHours)
     }
-    var sleepRecoveryFlagged: Bool { sleepAdjustedLoadScore.recoveryFlagged }
 
     var nutritionTarget: NutritionTarget {
         let recalibration = WeeklyRecalibrationEngine.recalibratedBaselineAdjustment(profile: profile, weighIns: bodyweightLogLb)
@@ -337,17 +369,23 @@ final class AppStore: ObservableObject {
         }
         guard !completedSets.isEmpty else { return }
 
-        let session = WorkoutSession(date: Date(), sets: completedSets)
+        // Feature request — "denote that specific workout was completed for the week." Tagged
+        // with whichever day/week was actually being trained (`activeWeek`, not necessarily the
+        // real current week — see `selectDay`), so completion tracking is correct even when
+        // catching up on a different week.
+        let session = WorkoutSession(date: Date(), sets: completedSets, programDayIndex: currentProgramDayIndex, programWeek: activeWeek)
         trailingSessions.append(session)
         // Feature request — congratulatory screen + review, reads this.
         lastCompletedSession = session
 
-        // FRG-104 — advance to the next day in the current week's rotation and rebuild the
-        // exercise list from it, rather than just resetting today's `done` flags in place. This
-        // is also what DaySelectionView highlights as the "suggested" day afterward.
-        let daysThisWeek = program.days(forWeek: currentProgramWeek)
-        currentProgramDayIndex = daysThisWeek.isEmpty ? 0 : (currentProgramDayIndex + 1) % daysThisWeek.count
-        todaysExercises = Self.buildExerciseSlots(for: program, week: currentProgramWeek, dayIndex: currentProgramDayIndex)
+        // Feature request — "suggest the next workout depending on the week and what has already
+        // been done during that week" — the next not-yet-done day this week, rather than blindly
+        // rotating to "whatever's next in sequence" regardless of what's actually been completed.
+        // Also returns to the real current week (rather than staying on whatever week was just
+        // caught up on) so the next time Train opens, it's back to "this week" by default.
+        activeWeek = currentProgramWeek
+        currentProgramDayIndex = suggestedDayIndex(forWeek: activeWeek)
+        todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
 
         Task { await SyncQueue.shared.enqueue(.workoutSession(session)) }
@@ -543,6 +581,10 @@ final class AppStore: ObservableObject {
         var daysLogged = 0
         var calorieSum = 0
         var targetSum = 0.0
+        // Calories are now fixed by activity level + goal + weekly recalibration only (no more
+        // per-day Load Score swing), so the target is the same every day — computed once rather
+        // than re-deriving a per-day Load Score that no longer changes the result.
+        let dailyTargetCalories = NutritionTargetEngine.calculate(profile: profile, loadScore: 1.0).calories
         for dayOffset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: Date()) else { continue }
             let startOfDay = calendar.startOfDay(for: day)
@@ -552,14 +594,9 @@ final class AppStore: ObservableObject {
             let kcalConsumed = dayFood.values.flatMap { $0 }.reduce(0) { $0 + $1.kcal }
             guard kcalConsumed > 0 else { continue }
 
-            let priorSessions = trailingSessions.filter { $0.date < startOfDay }
-            let daySession = trailingSessions.first { calendar.isDate($0.date, inSameDayAs: day) }
-            let loadScore = LoadScoreCalculator.loadScore(today: daySession, trailingSessions: priorSessions, asOf: startOfDay)
-            let target = NutritionTargetEngine.calculate(profile: profile, loadScore: loadScore)
-
             daysLogged += 1
             calorieSum += kcalConsumed
-            targetSum += target.calories
+            targetSum += dailyTargetCalories
         }
         guard daysLogged > 0 else { return NutritionWeekSummary(daysLogged: 0, avgCalories: 0, avgTargetCalories: 0, avgCaloriePercent: 0) }
         let avgCalories = calorieSum / daysLogged
