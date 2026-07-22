@@ -12,12 +12,16 @@ enum PendingWrite {
     case workoutSession(WorkoutSession)
     case foodEntry(entry: FoodEntry, meal: Meal)
     case bodyweightEntry(date: Date, weightLb: Double)
+    // Feature request — "the foods logged also need to be editable and deletable." `foodEntry`
+    // above now upserts by the entry's own stable id (see CloudKitStore.saveFoodEntry), so it
+    // already covers edits; this covers the delete half.
+    case deleteFoodEntry(id: UUID)
 }
 
 // Manual Codable — Swift doesn't synthesize Codable for enums with associated values.
 extension PendingWrite: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, profile, program, savedPrograms, dayIndex, programStartDate, session, entry, meal, date, weightLb
+        case type, profile, program, savedPrograms, dayIndex, programStartDate, session, entry, meal, date, weightLb, id
     }
 
     func encode(to encoder: Encoder) throws {
@@ -41,6 +45,9 @@ extension PendingWrite: Codable {
             try container.encode("bodyweightEntry", forKey: .type)
             try container.encode(date, forKey: .date)
             try container.encode(weightLb, forKey: .weightLb)
+        case .deleteFoodEntry(let id):
+            try container.encode("deleteFoodEntry", forKey: .type)
+            try container.encode(id, forKey: .id)
         }
     }
 
@@ -61,6 +68,8 @@ extension PendingWrite: Codable {
             self = .foodEntry(entry: try container.decode(FoodEntry.self, forKey: .entry), meal: try container.decode(Meal.self, forKey: .meal))
         case "bodyweightEntry":
             self = .bodyweightEntry(date: try container.decode(Date.self, forKey: .date), weightLb: try container.decode(Double.self, forKey: .weightLb))
+        case "deleteFoodEntry":
+            self = .deleteFoodEntry(id: try container.decode(UUID.self, forKey: .id))
         case let unknown:
             throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Unknown PendingWrite type: \(unknown)")
         }
@@ -136,6 +145,8 @@ actor SyncQueue {
             try await CloudKitStore.shared.saveFoodEntry(entry, meal: meal)
         case .bodyweightEntry(let date, let weightLb):
             try await CloudKitStore.shared.saveBodyweightEntry(date: date, weightLb: weightLb)
+        case .deleteFoodEntry(let id):
+            try await CloudKitStore.shared.deleteFoodEntry(id: id)
         }
     }
 

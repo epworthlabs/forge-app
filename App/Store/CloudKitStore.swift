@@ -113,8 +113,20 @@ actor CloudKitStore {
 
     // MARK: Food entries
 
+    // Feature request — "the foods logged also need to be editable and deletable." Previously
+    // always created a brand-new record with a random CloudKit-assigned ID, so there was no way
+    // to find a specific entry again later to update or delete it — the local `FoodEntry.id`
+    // (a UUID) and the CloudKit record's own ID were completely disconnected. Now keyed by that
+    // same UUID (same fixed-ID upsert pattern `saveProfile` already uses), so this one method
+    // naturally handles both "log a new entry" and "save edits to an existing one," and
+    // `deleteFoodEntry` below can target a specific record directly.
+    private static func foodEntryRecordID(_ id: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: id.uuidString)
+    }
+
     func saveFoodEntry(_ entry: FoodEntry, meal: Meal) async throws {
-        let record = CKRecord(recordType: "FoodEntry")
+        let recordID = Self.foodEntryRecordID(entry.id)
+        let record = (try? await database.record(for: recordID)) ?? CKRecord(recordType: "FoodEntry", recordID: recordID)
         record["date"] = entry.date
         record["meal"] = meal.rawValue
         record["name"] = entry.name
@@ -123,6 +135,10 @@ actor CloudKitStore {
         record["carbG"] = entry.carbG
         record["fatG"] = entry.fatG
         _ = try await database.save(record)
+    }
+
+    func deleteFoodEntry(id: UUID) async throws {
+        _ = try await database.deleteRecord(withID: Self.foodEntryRecordID(id))
     }
 
     /// Fetches every FoodEntry between `start` and `end` — used both for "today's diary" (a

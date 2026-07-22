@@ -243,7 +243,6 @@ private struct ExerciseCard: View {
     let slot: ExerciseSlot
     var onLineupChanged: () -> Void
     @State private var suggestionDismissed = false
-    @State private var editingSets = false
     @State private var swappingExercise = false
 
     var body: some View {
@@ -258,9 +257,6 @@ private struct ExerciseCard: View {
                     Spacer()
                     Menu {
                         Button("Swap Exercise") { swappingExercise = true }
-                        if !editingSets {
-                            Button("Edit Sets") { editingSets = true }
-                        }
                         Button("Remove Exercise", role: .destructive) {
                             store.removeExercise(exerciseID: slot.id)
                             onLineupChanged()
@@ -288,28 +284,13 @@ private struct ExerciseCard: View {
                     }
                 }
 
+                // Feature request — "the reps and weights in the training tracker needs to be
+                // adjustable without adding an edit flow." Previously required toggling "Edit
+                // Sets" (a separate mode swapping in a different row type) before weight/reps
+                // could be touched at all — every row is now always directly adjustable, no mode
+                // switch. This also merges the old "Edit Sets"-only remove-set capability in.
                 ForEach(slot.sets) { set in
-                    if editingSets {
-                        EditableSetRow(exerciseID: slot.id, set: set, canRemove: slot.sets.count > 1)
-                    } else {
-                        SetRow(exerciseID: slot.id, set: set)
-                    }
-                }
-
-                if editingSets {
-                    // Feature request — a dedicated, visible confirm action rather than only the
-                    // toggle buried in the ⋯ menu. Deliberately does NOT trigger the future-weeks
-                    // prompt: "ask... don't do this for edits" — that prompt is reserved for
-                    // swap/add/remove (a change to which exercises are on the day), not a
-                    // sets/reps/weight tweak to an exercise that's already there.
-                    Button {
-                        editingSets = false
-                    } label: {
-                        Text("Done Editing").font(ForgeType.body).frame(maxWidth: .infinity)
-                            .padding(14).foregroundStyle(Color.white).background(ForgeColors.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+                    SetRow(exerciseID: slot.id, set: set, canRemove: slot.sets.count > 1)
                 }
 
                 DashedActionButton(title: "+ Add Set") { store.addSet(exerciseID: slot.id) }
@@ -353,79 +334,75 @@ private struct SuggestionCard: View {
     }
 }
 
+/// Feature request — "the reps and weights in the training tracker needs to be adjustable
+/// without adding an edit flow." Merges the old tap-to-complete row and the separate
+/// "Edit Sets"-only row into one: weight/reps are always directly adjustable, no mode toggle.
+/// RPE is also "made optional... hide it somewhere" — collapsed by default behind a small
+/// "+ RPE" link once a set is marked done, instead of auto-expanding a 1-10 picker on everyone.
 private struct SetRow: View {
     @EnvironmentObject var store: AppStore
     let exerciseID: ExerciseSlot.ID
     let set: LoggedSet
+    let canRemove: Bool
+    @State private var rpeExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button {
-                store.toggleSet(exerciseID: exerciseID, setID: set.id)
-            } label: {
-                HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Button {
+                    store.toggleSet(exerciseID: exerciseID, setID: set.id)
+                } label: {
                     Circle()
                         .strokeBorder(set.done ? ForgeColors.accent : ForgeColors.inkMuted, lineWidth: 2)
                         .background(Circle().fill(set.done ? ForgeColors.accent : Color.clear))
                         .frame(width: 24, height: 24)
-                    Text("\(WeightUnit.roundedLb(fromKg: set.weightKg)) lb × \(set.reps)")
-                        .font(ForgeType.body)
-                        .foregroundStyle(set.done ? ForgeColors.ink : ForgeColors.inkMuted)
-                    Spacer()
-                    if let rpe = set.rpe {
-                        Text("RPE \(String(format: "%.0f", rpe))").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                    }
-                }
-                .padding(.vertical, 13).padding(.horizontal, 10)
-                .frame(minHeight: 44)
-                .background(set.done ? ForgeColors.tileBackground : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .buttonStyle(.plain)
-
-            // RPE input surfaces once a set is marked done — logged as effort, not a required
-            // pre-condition, so a quick tap-to-complete flow stays fast between sets.
-            if set.done {
-                RPEPicker(value: set.rpe ?? 8) { newValue in
-                    store.updateRPE(exerciseID: exerciseID, setID: set.id, rpe: newValue)
-                }
-                .padding(.leading, 26)
-            }
-        }
-    }
-}
-
-/// Feature request — swaps the normal tap-to-complete row for direct weight/reps editing plus a
-/// remove button, while "Edit Sets" is toggled on for this exercise.
-private struct EditableSetRow: View {
-    @EnvironmentObject var store: AppStore
-    let exerciseID: ExerciseSlot.ID
-    let set: LoggedSet
-    let canRemove: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            // Feature request — "a numpad to come up when inputting weights, keep the +/- of 5lb
-            // increments as well." Typed entry for getting to a specific number fast, plus the
-            // existing quick-adjust buttons for small in-set corrections.
-            WeightNumberField(weightLb: Binding(
-                get: { WeightUnit.lb(fromKg: set.weightKg) },
-                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: WeightUnit.kg(fromLb: $0), reps: set.reps) }
-            ))
-            RepsNumberField(reps: Binding(
-                get: { set.reps },
-                set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
-            ))
-            if canRemove {
-                Button { store.removeSet(exerciseID: exerciseID, setID: set.id) } label: {
-                    Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.trailing, -6)
+
+                WeightNumberField(weightLb: Binding(
+                    get: { WeightUnit.lb(fromKg: set.weightKg) },
+                    set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: WeightUnit.kg(fromLb: $0), reps: set.reps) }
+                ))
+                RepsNumberField(reps: Binding(
+                    get: { set.reps },
+                    set: { store.updateSet(exerciseID: exerciseID, setID: set.id, weightKg: set.weightKg, reps: $0) }
+                ))
+
+                if canRemove {
+                    Button { store.removeSet(exerciseID: exerciseID, setID: set.id) } label: {
+                        Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(9)
+            .background(set.done ? ForgeColors.tileBackground : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            // RPE — "make the RPE optional as well, can we hide it somewhere" — collapsed behind
+            // a small link rather than auto-expanding a 1-10 picker the moment a set is done.
+            if set.done {
+                Button {
+                    rpeExpanded.toggle()
+                } label: {
+                    Text(set.rpe.map { "RPE \(String(format: "%.0f", $0))" } ?? "+ RPE")
+                        .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 26)
+
+                if rpeExpanded {
+                    RPEPicker(value: set.rpe ?? 8) { newValue in
+                        store.updateRPE(exerciseID: exerciseID, setID: set.id, rpe: newValue)
+                    }
+                    .padding(.leading, 26)
+                }
             }
         }
-        .padding(9)
-        .background(ForgeColors.tileBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -444,7 +421,7 @@ private struct WeightNumberField: View {
         HStack(spacing: 6) {
             Button { weightLb = max(0, weightLb - 5) } label: {
                 Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
 
@@ -477,7 +454,7 @@ private struct WeightNumberField: View {
 
             Button { weightLb = min(1100, weightLb + 5) } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
         }
@@ -496,40 +473,40 @@ private struct RepsNumberField: View {
         HStack(spacing: 6) {
             Button { reps = max(1, reps - 1) } label: {
                 Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
 
-            HStack(spacing: 3) {
-                TextField("", text: $text)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 22)
-                    .focused($isFocused)
-                    .onAppear { text = String(reps) }
-                    .onChange(of: reps) { newValue in
-                        if !isFocused { text = String(newValue) }
+            // No "reps" suffix here (unlike weight's "lb") — space is tight once this sits in the
+            // same row as the done-circle, weight, and trash; a bare count reads fine positioned
+            // right after weight with its own matching ± pair.
+            TextField("", text: $text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                .frame(width: 20)
+                .focused($isFocused)
+                .onAppear { text = String(reps) }
+                .onChange(of: reps) { newValue in
+                    if !isFocused { text = String(newValue) }
+                }
+                .onChange(of: isFocused) { focused in
+                    if focused {
+                        text = ""
+                    } else if text.isEmpty {
+                        text = String(reps)
                     }
-                    .onChange(of: isFocused) { focused in
-                        if focused {
-                            text = ""
-                        } else if text.isEmpty {
-                            text = String(reps)
-                        }
-                    }
-                    .onChange(of: text) { newText in
-                        let digits = newText.filter(\.isNumber)
-                        if digits != newText { text = digits }
-                        guard let parsed = Int(digits) else { return }
-                        reps = min(50, max(1, parsed))
-                    }
-                Text("reps").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-            }
+                }
+                .onChange(of: text) { newText in
+                    let digits = newText.filter(\.isNumber)
+                    if digits != newText { text = digits }
+                    guard let parsed = Int(digits) else { return }
+                    reps = min(50, max(1, parsed))
+                }
 
             Button { reps = min(50, reps + 1) } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 26, height: 26).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
         }

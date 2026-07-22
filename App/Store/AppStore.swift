@@ -302,6 +302,24 @@ final class AppStore: ObservableObject {
         Task { await SyncQueue.shared.enqueue(.foodEntry(entry: entry, meal: meal)) }
     }
 
+    // Feature request — "the foods logged also need to be editable and deletable."
+    func updateFoodEntry(id: FoodEntry.ID, in meal: Meal, name: String, kcal: Int, proteinG: Int, carbG: Int, fatG: Int) {
+        guard let index = mealEntries[meal]?.firstIndex(where: { $0.id == id }) else { return }
+        var updated = mealEntries[meal]![index]
+        updated.name = name
+        updated.kcal = kcal
+        updated.proteinG = proteinG
+        updated.carbG = carbG
+        updated.fatG = fatG
+        mealEntries[meal]![index] = updated
+        Task { await SyncQueue.shared.enqueue(.foodEntry(entry: updated, meal: meal)) }
+    }
+
+    func removeFoodEntry(id: FoodEntry.ID, from meal: Meal) {
+        mealEntries[meal]?.removeAll { $0.id == id }
+        Task { await SyncQueue.shared.enqueue(.deleteFoodEntry(id: id)) }
+    }
+
     // FRG-130/131 — appends a new weigh-in; there was previously no UI path that ever grew
     // `bodyweightLogLb` past its single onboarding seed value.
     func logWeight(_ weightLb: Double) {
