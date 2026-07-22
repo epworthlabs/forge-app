@@ -432,6 +432,7 @@ private struct WeightNumberField: View {
                     .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
                     .frame(width: 34)
                     .focused($isFocused)
+                    .numpadDoneButton(isFocused: $isFocused)
                     .onAppear { text = String(Int(weightLb.rounded())) }
                     .onChange(of: weightLb) { newValue in
                         if !isFocused { text = String(Int(newValue.rounded())) }
@@ -486,6 +487,7 @@ private struct RepsNumberField: View {
                 .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
                 .frame(width: 20)
                 .focused($isFocused)
+                .numpadDoneButton(isFocused: $isFocused)
                 .onAppear { text = String(reps) }
                 .onChange(of: reps) { newValue in
                     if !isFocused { text = String(newValue) }

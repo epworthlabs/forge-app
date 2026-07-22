@@ -122,6 +122,8 @@ private struct PortionConfirmSheet: View {
     private let referenceGrams: Double?
     @State private var unit: PortionUnit
     @State private var quantityText: String
+    @FocusState private var quantityFocused: Bool
+    @State private var quantityBeforeFocus: String = ""
 
     init(food: FoodSearchResult, meal: Meal, onConfirm: @escaping (FoodSearchResult) -> Void) {
         self.food = food
@@ -165,6 +167,19 @@ private struct PortionConfirmSheet: View {
                         .frame(width: 90)
                         .background(ForgeColors.tileBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .focused($quantityFocused)
+                        .numpadDoneButton(isFocused: $quantityFocused)
+                        // "Make the numpad entering more intuitive in all cases... I don't want
+                        // to have to select the number when editing the field" — same
+                        // clear-on-focus treatment as every other numeric field in the app.
+                        .onChange(of: quantityFocused) { focused in
+                            if focused {
+                                quantityBeforeFocus = quantityText
+                                quantityText = ""
+                            } else if quantityText.isEmpty {
+                                quantityText = quantityBeforeFocus
+                            }
+                        }
 
                     Picker("Unit", selection: $unit) {
                         ForEach(availableUnits, id: \.self) { u in Text(u.rawValue).tag(u) }

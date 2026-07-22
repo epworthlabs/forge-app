@@ -279,26 +279,45 @@ private struct ExerciseRowEditor: View {
 }
 
 /// Feature request — numeric-keypad entry, filtering to digits only and clamping to `range` as
-/// the user types, rather than a Stepper's one-tap-at-a-time increments.
+/// the user types, rather than a Stepper's one-tap-at-a-time increments. Clears on focus and
+/// gets a keyboard "Done" button — "make the numpad entering more intuitive in all cases... I
+/// don't want to have to select the number when editing the field... keep the formatting and
+/// everything else as is though" — same behavior as every other numpad field in the app now,
+/// grafted onto this field's existing visual style (frame/padding/corner radius unchanged).
 private struct NumberField: View {
     @Binding var value: Int
     var range: ClosedRange<Int>
     var suffix: String?
 
+    @FocusState private var isFocused: Bool
+    @State private var text: String = ""
+
     var body: some View {
         HStack(spacing: 4) {
-            TextField("", text: Binding(
-                get: { String(value) },
-                set: { newText in
+            TextField("", text: $text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
+                .frame(width: 44)
+                .focused($isFocused)
+                .numpadDoneButton(isFocused: $isFocused)
+                .onAppear { text = String(value) }
+                .onChange(of: value) { newValue in
+                    if !isFocused { text = String(newValue) }
+                }
+                .onChange(of: isFocused) { focused in
+                    if focused {
+                        text = ""
+                    } else if text.isEmpty {
+                        text = String(value)
+                    }
+                }
+                .onChange(of: text) { newText in
                     let digits = newText.filter(\.isNumber)
-                    let parsed = Int(digits) ?? range.lowerBound
+                    if digits != newText { text = digits }
+                    guard let parsed = Int(digits) else { return }
                     value = min(range.upperBound, max(range.lowerBound, parsed))
                 }
-            ))
-            .keyboardType(.numberPad)
-            .multilineTextAlignment(.trailing)
-            .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-            .frame(width: 44)
             if let suffix {
                 Text(suffix).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
             }

@@ -150,6 +150,22 @@ struct FoodMonogram: View {
     }
 }
 
+/// Feature request — "in all cases of a numpad, there needs to be a submit button that closes
+/// the numpad." The `.numberPad`/`.decimalPad` keyboards have no built-in Return/Done key (unlike
+/// the standard alphabetic keyboard), so every numeric-keypad field in the app attaches this to
+/// the keyboard's own accessory toolbar instead of relying on tap-elsewhere-to-dismiss.
+extension View {
+    func numpadDoneButton(isFocused: FocusState<Bool>.Binding) -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { isFocused.wrappedValue = false }
+                    .fontWeight(.semibold)
+            }
+        }
+    }
+}
+
 /// Feature request — "when I input numbers with a numpad... limit the set and rep ranges to be 2
 /// digits max, weights... 3 digits max" + "if I first tap that field to edit and input a new
 /// number it should replace the existing numbers." Clears on focus (so the first keystroke starts
@@ -172,6 +188,7 @@ struct NumpadField: View {
                 .multilineTextAlignment(.center)
                 .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                 .focused($isFocused)
+                .numpadDoneButton(isFocused: $isFocused)
                 .frame(minWidth: 40)
             if let suffix {
                 Text(suffix).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
