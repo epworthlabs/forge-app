@@ -97,6 +97,18 @@ private let fatSecretFixture = Data("""
 """.utf8)
 // swiftlint:enable line_length
 
+private extension [FoodSearchResult] {
+    /// `FoodSearchService.search` merges live API results with locally-bundled ones
+    /// (`CuratedFoodLibrary`, and per-device custom foods/recipes) that no `MockURLProtocol` stub
+    /// controls — searching "chicken" picks up the curated chicken entries for real. The tests
+    /// below are about the *network* merge/dedup/timeout behaviour specifically, so they filter
+    /// to network-sourced results rather than asserting a total count, which would otherwise
+    /// break every time someone adds a matching food to `Resources/foods.json`.
+    var fromNetworkSources: [FoodSearchResult] {
+        filter { $0.source == .usda || $0.source == .openFoodFacts || $0.source == .fatSecret }
+    }
+}
+
 @Suite struct FatSecretClientTests {
     @Test func parsesMacrosFromFreeTextDescription() {
         let description = "Per 100g - Calories: 165kcal | Fat: 3.57g | Carbs: 0.00g | Protein: 31.02g"
@@ -201,7 +213,7 @@ private let fatSecretFixture = Data("""
         let credentials = FoodDatabaseCredentials(usdaAPIKey: "DEMO_KEY")
         let service = FoodSearchService(credentials: credentials, session: MockURLProtocol.makeSession())
 
-        let results = await service.search(query: "chicken")
+        let results = await service.search(query: "chicken").fromNetworkSources
 
         #expect(results.count == 2) // 1 valid USDA result + 1 valid Open Food Facts result
         #expect(results.contains { $0.source == .usda })
@@ -222,7 +234,7 @@ private let fatSecretFixture = Data("""
         let credentials = FoodDatabaseCredentials(usdaAPIKey: "DEMO_KEY") // no FatSecret creds
         let service = FoodSearchService(credentials: credentials, session: MockURLProtocol.makeSession())
 
-        let results = await service.search(query: "chicken")
+        let results = await service.search(query: "chicken").fromNetworkSources
         #expect(!results.contains { $0.source == .fatSecret })
         #expect(results.count == 2)
     }
@@ -246,7 +258,7 @@ private let fatSecretFixture = Data("""
         )
 
         let start = ContinuousClock.now
-        let results = await service.search(query: "chicken")
+        let results = await service.search(query: "chicken").fromNetworkSources
         let elapsed = start.duration(to: .now)
 
         // The 0.3s delayed FatSecret response should get cut off by the 50ms timeout, not awaited
