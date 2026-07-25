@@ -77,30 +77,41 @@ final class RecipeStore: ObservableObject {
         return matches.map(\.asFoodSearchResult)
     }
 
+    // FRG-383 — the whole library syncs as one blob (see CloudKitStore.saveRecipes); a delete is
+    // just the next save without the recipe, so both paths push the same snapshot.
     func add(_ recipe: Recipe) {
         recipes.append(recipe)
         persist()
-        Task { await SyncQueue.shared.enqueue(.recipe(recipe)) }
+        let snapshot = recipes
+        Task { await SyncQueue.shared.enqueue(.recipes(snapshot)) }
     }
 
     func remove(_ recipe: Recipe) {
         recipes.removeAll { $0.id == recipe.id }
         persist()
-        Task { await SyncQueue.shared.enqueue(.deleteRecipe(id: recipe.id)) }
+        let snapshot = recipes
+        Task { await SyncQueue.shared.enqueue(.recipes(snapshot)) }
     }
 
     // Bug fix — backfills recipes for a returning user (or a fresh reinstall) from CloudKit.
     // Called once after sign-in, same "called once after construction, not from init" reasoning
     // as `AppStore.loadHistoryFromCloudKit`. Merges rather than overwrites: a recipe added while
     // offline (queued in SyncQueue, not yet actually saved to CloudKit) would otherwise vanish the
-    // moment this fetch runs and replaces `recipes` outright.
+    // moment this fetch runs and replaces `recipes` outright. If the merge found local-only
+    // recipes the server doesn't have, push the union back up so the server heals too.
     func loadFromCloudKit() async {
-        guard let fetched = try? await CloudKitStore.shared.fetchRecipes() else { return }
-        var merged = fetched
+        guard let fetched = try? await CloudKitStore.shared.fetchRecipes() else {
+            print("[CloudKit] recipes fetch failed")
+            return
+        }
         let fetchedIDs = Set(fetched.map(\.id))
-        merged.append(contentsOf: recipes.filter { !fetchedIDs.contains($0.id) })
-        recipes = merged
+        let localOnly = recipes.filter { !fetchedIDs.contains($0.id) }
+        recipes = fetched + localOnly
         persist()
+        if !localOnly.isEmpty {
+            let snapshot = recipes
+            Task { await SyncQueue.shared.enqueue(.recipes(snapshot)) }
+        }
     }
 
     private func persist() {

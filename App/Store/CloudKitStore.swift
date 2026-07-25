@@ -3,16 +3,27 @@ import CloudKit
 import ForgeCore
 
 /// FRG-130/131 — private CloudKit database only (this is per-user data, never shared/public).
-/// Record types intentionally mirror the app's existing plain-struct model (`UserProfile`,
-/// `WorkoutSession`, `FoodEntry`) rather than introducing a parallel schema, so there's one
-/// source of truth for what a "profile" or "session" looks like — matches the README's
-/// "swapping the storage underneath shouldn't change any view code" intent.
 ///
-/// The `date` fields on WorkoutSession/FoodEntry/BodyweightEntry need to be marked Queryable
-/// (and Sortable, for the bodyweight log) in the CloudKit Dashboard's Development schema before
-/// the query methods below will work — CloudKit auto-creates a record type's schema on first
-/// save, but querying/sorting by a custom field needs that field indexed explicitly. This is a
-/// one-time manual step, not something `xcodebuild` or this code can configure remotely.
+/// ROOT-CAUSE fix (FRG-383) — "when a new day rolls over / when I uninstall, my workouts, weight,
+/// and recipes are all gone." Every history *read* here used to go through `CKQuery` — either
+/// `NSPredicate(value: true)` (sessions, bodyweight, recipes) or a date-range predicate (food).
+/// Both query forms require indexes configured manually in the CloudKit Dashboard: a date
+/// predicate needs the `date` field marked Queryable (a step this file's old header admitted was
+/// pending), and `NSPredicate(value: true)` needs the *recordName* system field marked Queryable —
+/// which CloudKit does not auto-create and the Dashboard doesn't even surface prominently. Neither
+/// was ever configured, so every fetch threw, every call site's `try?` swallowed it, and the app
+/// started empty on each cold launch — while *saves* kept succeeding (schema auto-creates on first
+/// save), which is why the user's profile (fetched by ID, no query, no index needed) always
+/// survived reinstall while everything else vanished. The data was reaching the server and then
+/// being unreachable.
+///
+/// The fix removes queries entirely: every domain is now stored the way the always-working profile
+/// record is — a fixed, predictable record ID holding the domain's data as one JSON blob, fetched
+/// directly by ID (`database.record(for:)` / `records(for:)`), which requires no Dashboard
+/// configuration whatsoever, in Development or Production. Sessions chunk by calendar year (1MB
+/// record cap headroom), food chunks by day (its natural access pattern), bodyweight and recipes
+/// are single records. Old per-entry records from the query era remain orphaned on the server —
+/// they were unreachable anyway and are harmless.
 actor CloudKitStore {
     static let shared = CloudKitStore()
 
@@ -101,184 +112,147 @@ actor CloudKitStore {
         return (profile, program, savedPrograms, dayIndex, programStartDate)
     }
 
-    // MARK: Workout sessions — sets serialized as JSON; a session is small enough that a child
-    // record per set would be needless CloudKit round-trip overhead for no real benefit.
+    // MARK: Workout sessions — full history as JSON, one fixed-ID record per calendar year
+    // (fetched directly by ID, no query), chunked so a heavy multi-year history can't hit the
+    // 1MB-per-record cap.
 
-    func saveWorkoutSession(_ session: WorkoutSession) async throws {
-        let record = CKRecord(recordType: "WorkoutSession")
-        record["date"] = session.date
-        record["setsJSON"] = try JSONEncoder().encode(session.sets)
-        // Additive — see WorkoutSession's doc comment. nil values simply aren't written; CloudKit
-        // records don't store explicit nulls, so this reads back the same as an old record that
-        // predates these fields entirely.
-        if let programDayIndex = session.programDayIndex { record["programDayIndex"] = programDayIndex }
-        if let programWeek = session.programWeek { record["programWeek"] = programWeek }
-        if let programID = session.programID { record["programID"] = programID }
-        _ = try await database.save(record)
+    private static func sessionsRecordID(year: Int) -> CKRecord.ID {
+        CKRecord.ID(recordName: "workoutSessions-\(year)")
     }
 
-    func fetchWorkoutSessions() async throws -> [WorkoutSession] {
-        let query = CKQuery(recordType: "WorkoutSession", predicate: NSPredicate(value: true))
-        let (matchResults, _) = try await database.records(matching: query)
-        return matchResults.compactMap { _, result in
-            guard let record = try? result.get(),
-                  let date = record["date"] as? Date,
-                  let setsData = record["setsJSON"] as? Data,
-                  let sets = try? JSONDecoder().decode([SetLog].self, from: setsData)
-            else { return nil }
-            return WorkoutSession(
-                date: date, sets: sets,
-                programDayIndex: record["programDayIndex"] as? Int,
-                programWeek: record["programWeek"] as? Int,
-                programID: record["programID"] as? String
-            )
+    func saveAllWorkoutSessions(_ sessions: [WorkoutSession]) async throws {
+        let byYear = Dictionary(grouping: sessions) { Calendar.current.component(.year, from: $0.date) }
+        for (year, yearSessions) in byYear {
+            let recordID = Self.sessionsRecordID(year: year)
+            let record = (try? await database.record(for: recordID)) ?? CKRecord(recordType: "WorkoutSessionsByYear", recordID: recordID)
+            // Union with whatever the server already has, by session id — sessions are append-only
+            // in this app (no delete-a-session feature), so a device that saves before its own
+            // fetch completed (fresh install, transient fetch failure) can't clobber history it
+            // hasn't seen yet.
+            var merged = yearSessions
+            if let existingData = record["sessionsJSON"] as? Data,
+               let existing = try? JSONDecoder().decode([WorkoutSession].self, from: existingData) {
+                let ids = Set(merged.map(\.id))
+                merged += existing.filter { !ids.contains($0.id) }
+            }
+            record["sessionsJSON"] = try JSONEncoder().encode(merged.sorted { $0.date < $1.date })
+            _ = try await database.save(record)
         }
     }
 
-    // MARK: Food entries
-
-    // Feature request — "the foods logged also need to be editable and deletable." Previously
-    // always created a brand-new record with a random CloudKit-assigned ID, so there was no way
-    // to find a specific entry again later to update or delete it — the local `FoodEntry.id`
-    // (a UUID) and the CloudKit record's own ID were completely disconnected. Now keyed by that
-    // same UUID (same fixed-ID upsert pattern `saveProfile` already uses), so this one method
-    // naturally handles both "log a new entry" and "save edits to an existing one," and
-    // `deleteFoodEntry` below can target a specific record directly.
-    private static func foodEntryRecordID(_ id: UUID) -> CKRecord.ID {
-        CKRecord.ID(recordName: id.uuidString)
-    }
-
-    func saveFoodEntry(_ entry: FoodEntry, meal: Meal) async throws {
-        let recordID = Self.foodEntryRecordID(entry.id)
-        let record = (try? await database.record(for: recordID)) ?? CKRecord(recordType: "FoodEntry", recordID: recordID)
-        record["date"] = entry.date
-        record["meal"] = meal.rawValue
-        record["name"] = entry.name
-        record["kcal"] = entry.kcal
-        record["proteinG"] = entry.proteinG
-        record["carbG"] = entry.carbG
-        record["fatG"] = entry.fatG
-        // Feature request — serving-quantity editing. Additive fields; older records simply lack
-        // them and decode via FoodEntry's own defaults/fallbacks in fetchFoodEntries below.
-        record["quantity"] = entry.quantity
-        record["unit"] = entry.unit.rawValue
-        if let referenceGrams = entry.referenceGrams { record["referenceGrams"] = referenceGrams }
-        if let baseKcal = entry.baseKcal { record["baseKcal"] = baseKcal }
-        if let baseProteinG = entry.baseProteinG { record["baseProteinG"] = baseProteinG }
-        if let baseCarbG = entry.baseCarbG { record["baseCarbG"] = baseCarbG }
-        if let baseFatG = entry.baseFatG { record["baseFatG"] = baseFatG }
-        _ = try await database.save(record)
-    }
-
-    func deleteFoodEntry(id: UUID) async throws {
-        _ = try await database.deleteRecord(withID: Self.foodEntryRecordID(id))
-    }
-
-    /// Fetches every FoodEntry between `start` and `end` — used both for "today's diary" (a
-    /// one-day window) and CSV export (an open-ended historical window).
-    func fetchFoodEntries(from start: Date, to end: Date) async throws -> [Meal: [FoodEntry]] {
-        let predicate = NSPredicate(format: "date >= %@ AND date < %@", start as NSDate, end as NSDate)
-        let query = CKQuery(recordType: "FoodEntry", predicate: predicate)
-        let (matchResults, _) = try await database.records(matching: query)
-
-        var byMeal: [Meal: [FoodEntry]] = [.breakfast: [], .lunch: [], .dinner: [], .snacks: []]
-        for (_, result) in matchResults {
+    func fetchAllWorkoutSessions() async throws -> [WorkoutSession] {
+        // Ten year-records covers any plausible history; missing years just come back as
+        // per-ID unknownItem results and are skipped.
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let ids = ((currentYear - 9)...currentYear).map { Self.sessionsRecordID(year: $0) }
+        let results = try await database.records(for: ids)
+        var all: [WorkoutSession] = []
+        for (_, result) in results {
             guard let record = try? result.get(),
-                  let mealRaw = record["meal"] as? String, let meal = Meal(rawValue: mealRaw),
-                  let date = record["date"] as? Date,
-                  let name = record["name"] as? String,
-                  let kcal = record["kcal"] as? Int,
-                  let proteinG = record["proteinG"] as? Int,
-                  let carbG = record["carbG"] as? Int,
-                  let fatG = record["fatG"] as? Int
+                  let data = record["sessionsJSON"] as? Data,
+                  let sessions = try? JSONDecoder().decode([WorkoutSession].self, from: data)
             else { continue }
-            let unit = (record["unit"] as? String).flatMap(PortionUnit.init(rawValue:)) ?? .servings
-            byMeal[meal, default: []].append(FoodEntry(
-                date: date, name: name, kcal: kcal, proteinG: proteinG, carbG: carbG, fatG: fatG,
-                quantity: record["quantity"] as? Double ?? 1,
-                unit: unit,
-                referenceGrams: record["referenceGrams"] as? Double,
-                baseKcal: record["baseKcal"] as? Double,
-                baseProteinG: record["baseProteinG"] as? Double,
-                baseCarbG: record["baseCarbG"] as? Double,
-                baseFatG: record["baseFatG"] as? Double
-            ))
+            all += sessions
         }
-        return byMeal
+        return all.sorted { $0.date < $1.date }
     }
 
-    // MARK: Bodyweight
+    // MARK: Food — one fixed-ID record per calendar day ("food-2026-07-25") holding that day's
+    // whole diary as JSON. The day key doubles as the record name, so any day is fetchable
+    // directly by ID; edits and deletes just re-save the whole (small) day.
 
-    func saveBodyweightEntry(date: Date, weightLb: Double) async throws {
-        let record = CKRecord(recordType: "BodyweightEntry")
-        record["date"] = date
-        record["weightLb"] = weightLb
+    private static func foodDayRecordID(_ dayKey: String) -> CKRecord.ID {
+        CKRecord.ID(recordName: "food-\(dayKey)")
+    }
+
+    func saveFoodDay(dayKey: String, entries: [Meal: [FoodEntry]]) async throws {
+        let recordID = Self.foodDayRecordID(dayKey)
+        let record = (try? await database.record(for: recordID)) ?? CKRecord(recordType: "FoodDay", recordID: recordID)
+        // Whole-day replace, deliberately not a union — entries are deletable, and a union would
+        // resurrect deleted ones. Day-scoped, so the clobber blast radius is one day's diary.
+        record["entriesJSON"] = try JSONEncoder().encode(entries)
         _ = try await database.save(record)
     }
 
-    // Bug fix — "the weight I log doesn't carry over to the next day... make sure that record is
-    // kept regardless of whether the app gets deleted or rolls over to a new day." This used to
-    // sort server-side via `query.sortDescriptors`, which (per this file's own doc comment above)
-    // needs the "date" field explicitly marked *Sortable* in the CloudKit Dashboard — a manual,
-    // easy-to-miss step distinct from just Queryable. If that was never set, this query throws,
-    // `AppStore.loadHistoryFromCloudKit`'s `try?` silently swallows it, and every fetch quietly
-    // failed — falling back to `init`'s single fresh seed value every single time, which reads
-    // exactly like "never carries over," reinstall or not. Sorting client-side after an
-    // unfiltered fetch needs no field-level index at all, so this can't be broken by a schema
-    // setting no code here can configure.
-    func fetchBodyweightLog() async throws -> [(date: Date, weightLb: Double)] {
-        let query = CKQuery(recordType: "BodyweightEntry", predicate: NSPredicate(value: true))
-        let (matchResults, _) = try await database.records(matching: query)
-        let entries = matchResults.compactMap { _, result -> (date: Date, weightLb: Double)? in
-            guard let record = try? result.get(),
-                  let date = record["date"] as? Date,
-                  let weightLb = record["weightLb"] as? Double
-            else { return nil }
-            return (date: date, weightLb: weightLb)
+    /// Missing record decodes as an empty day (genuinely nothing logged) — distinct from a thrown
+    /// error (network/account trouble), which callers should treat as "unknown," not "empty."
+    func fetchFoodDay(dayKey: String) async throws -> [Meal: [FoodEntry]] {
+        do {
+            let record = try await database.record(for: Self.foodDayRecordID(dayKey))
+            guard let data = record["entriesJSON"] as? Data else { return [:] }
+            return (try? JSONDecoder().decode([Meal: [FoodEntry]].self, from: data)) ?? [:]
+        } catch let error as CKError where error.code == .unknownItem {
+            return [:]
         }
-        return entries.sorted { $0.date < $1.date }
     }
 
-    // MARK: Recipes
-
-    // Bug fix — "when I redownloaded the app, my recipes weren't saved... make sure that saves
-    // even if the app gets deleted or new day rolls over." `RecipeStore` used to be device-local
-    // only (Application Support, like `CustomExerciseStore`/`CustomFoodStore`) — a reasonable
-    // tradeoff for those two (explicitly "don't make it publicly shared," and unreliable
-    // user-authored data), but a saved recipe is a deliberate, meaningful save the user expects to
-    // last, the same category workout sessions/food entries/profile already occupy. CloudKit's
-    // private database is still per-user-private (never shared with other users), it just also
-    // survives a reinstall — same fixed-ID upsert pattern `saveFoodEntry` uses, keyed by the
-    // recipe's own `id` so re-saving/editing never creates a duplicate record.
-    private static func recipeRecordID(_ id: UUID) -> CKRecord.ID {
-        CKRecord.ID(recordName: "recipe-\(id.uuidString)")
+    /// Batch form for CSV export / weekly summaries — chunked to stay under CloudKit's per-op
+    /// record limits.
+    func fetchFoodDays(dayKeys: [String]) async throws -> [String: [Meal: [FoodEntry]]] {
+        var out: [String: [Meal: [FoodEntry]]] = [:]
+        var index = 0
+        while index < dayKeys.count {
+            let chunk = Array(dayKeys[index..<min(index + 100, dayKeys.count)])
+            index += 100
+            let results = try await database.records(for: chunk.map(Self.foodDayRecordID))
+            for (recordID, result) in results {
+                guard let record = try? result.get(),
+                      let data = record["entriesJSON"] as? Data,
+                      let entries = try? JSONDecoder().decode([Meal: [FoodEntry]].self, from: data)
+                else { continue }
+                out[String(recordID.recordName.dropFirst("food-".count))] = entries
+            }
+        }
+        return out
     }
 
-    func saveRecipe(_ recipe: Recipe) async throws {
-        let recordID = Self.recipeRecordID(recipe.id)
-        let record = (try? await database.record(for: recordID)) ?? CKRecord(recordType: "Recipe", recordID: recordID)
-        record["name"] = recipe.name
-        record["servings"] = recipe.servings
-        record["ingredientsJSON"] = try JSONEncoder().encode(recipe.ingredients)
+    // MARK: Bodyweight — the whole log as JSON on one fixed-ID record, fetched directly by ID.
+
+    private static let bodyweightRecordID = CKRecord.ID(recordName: "bodyweightLog")
+
+    func saveBodyweightLog(_ entries: [BodyweightEntry]) async throws {
+        let record = (try? await database.record(for: Self.bodyweightRecordID)) ?? CKRecord(recordType: "BodyweightLog", recordID: Self.bodyweightRecordID)
+        // Union by timestamp — weigh-ins are append-only (no delete UI), same clobber-guard
+        // reasoning as saveAllWorkoutSessions.
+        var merged = entries
+        if let data = record["entriesJSON"] as? Data,
+           let existing = try? JSONDecoder().decode([BodyweightEntry].self, from: data) {
+            let stamps = Set(merged.map(\.date))
+            merged += existing.filter { !stamps.contains($0.date) }
+        }
+        record["entriesJSON"] = try JSONEncoder().encode(merged.sorted { $0.date < $1.date })
         _ = try await database.save(record)
     }
 
-    func deleteRecipe(id: UUID) async throws {
-        _ = try await database.deleteRecord(withID: Self.recipeRecordID(id))
+    func fetchBodyweightLog() async throws -> [BodyweightEntry] {
+        do {
+            let record = try await database.record(for: Self.bodyweightRecordID)
+            guard let data = record["entriesJSON"] as? Data else { return [] }
+            return ((try? JSONDecoder().decode([BodyweightEntry].self, from: data)) ?? []).sorted { $0.date < $1.date }
+        } catch let error as CKError where error.code == .unknownItem {
+            return []
+        }
+    }
+
+    // MARK: Recipes — the whole library as JSON on one fixed-ID record, fetched directly by ID.
+
+    private static let recipesRecordID = CKRecord.ID(recordName: "recipes")
+
+    func saveRecipes(_ recipes: [Recipe]) async throws {
+        let record = (try? await database.record(for: Self.recipesRecordID)) ?? CKRecord(recordType: "RecipeList", recordID: Self.recipesRecordID)
+        // Whole-list replace, not a union — recipes are deletable, and a union would resurrect
+        // deleted ones. RecipeStore's merge-on-load covers the fresh-install direction instead.
+        record["recipesJSON"] = try JSONEncoder().encode(recipes)
+        _ = try await database.save(record)
     }
 
     func fetchRecipes() async throws -> [Recipe] {
-        let query = CKQuery(recordType: "Recipe", predicate: NSPredicate(value: true))
-        let (matchResults, _) = try await database.records(matching: query)
-        return matchResults.compactMap { _, result in
-            guard let record = try? result.get(),
-                  let name = record["name"] as? String,
-                  let servings = record["servings"] as? Int,
-                  let ingredientsData = record["ingredientsJSON"] as? Data,
-                  let ingredients = try? JSONDecoder().decode([RecipeIngredient].self, from: ingredientsData)
-            else { return nil }
-            let id = record.recordID.recordName.replacingOccurrences(of: "recipe-", with: "")
-            return Recipe(id: UUID(uuidString: id) ?? UUID(), name: name, servings: servings, ingredients: ingredients)
+        do {
+            let record = try await database.record(for: Self.recipesRecordID)
+            guard let data = record["recipesJSON"] as? Data else { return [] }
+            return (try? JSONDecoder().decode([Recipe].self, from: data)) ?? []
+        } catch let error as CKError where error.code == .unknownItem {
+            return []
         }
     }
 }

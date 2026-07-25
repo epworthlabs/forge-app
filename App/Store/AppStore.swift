@@ -21,7 +21,11 @@ struct ExerciseSlot: Identifiable, Equatable, Codable {
 }
 
 struct FoodEntry: Identifiable, Equatable, Codable {
-    let id = UUID()
+    // `var`, not `let` — an immutable property with a default is *excluded* from synthesized
+    // Codable, so a `let id` silently minted a fresh UUID on every decode. Now that entries
+    // round-trip through JSON (per-day CloudKit blobs + the local history mirror), the id must
+    // survive that trip or merge-by-id dedup would double every entry.
+    var id = UUID()
     var date: Date = Date()
     var name: String
     var kcal: Int
@@ -200,6 +204,18 @@ final class AppStore: ObservableObject {
         let week = Self.week(fromStartDate: programStartDate)
         self.activeWeek = week
         self.todaysExercises = Self.buildExerciseSlots(for: program, week: week, dayIndex: startingDayIndex)
+
+        // Root-cause fix (FRG-383) — seed history from the device-local mirror synchronously,
+        // before any CloudKit round-trip is even attempted. A cold launch (which is what a "day
+        // rollover" is in practice — the app relaunches the next morning) previously started with
+        // empty history and depended entirely on a CloudKit fetch that was silently failing; now
+        // yesterday's sessions/weigh-ins are on screen from the first frame, and CloudKit merges
+        // on top later. Meals only apply if they belong to today — a new day starts empty.
+        if let cached = LocalHistoryStore.load() {
+            if !cached.sessions.isEmpty { trailingSessions = cached.sessions }
+            if !cached.weighIns.isEmpty { bodyweightLogLb = cached.weighIns.map { ($0.date, $0.weightLb) } }
+            if cached.mealsDayKey == DayKey.today { mealEntries = cached.meals }
+        }
         refreshLastPerformance()
     }
 
@@ -453,7 +469,7 @@ final class AppStore: ObservableObject {
         // FRG-306 — no-op if no meal reminder is pending (reminders off, or already cancelled).
         ReminderManager.shared.cancelMealReminder()
 
-        Task { await SyncQueue.shared.enqueue(.foodEntry(entry: entry, meal: meal)) }
+        syncTodayFood()
     }
 
     // Feature request — "scrap the current editing flow... give them the ability to edit their
@@ -477,20 +493,42 @@ final class AppStore: ObservableObject {
         updated.carbG = Int((updated.effectiveBaseCarbG * multiplier).rounded())
         updated.fatG = Int((updated.effectiveBaseFatG * multiplier).rounded())
         mealEntries[meal]![index] = updated
-        Task { await SyncQueue.shared.enqueue(.foodEntry(entry: updated, meal: meal)) }
+        syncTodayFood()
     }
 
     func removeFoodEntry(id: FoodEntry.ID, from meal: Meal) {
         mealEntries[meal]?.removeAll { $0.id == id }
-        Task { await SyncQueue.shared.enqueue(.deleteFoodEntry(id: id)) }
+        syncTodayFood()
+    }
+
+    // FRG-383 — one path for every today's-diary mutation: mirror to local disk immediately
+    // (survives relaunch with no network at all), then push the whole day to CloudKit (a delete
+    // is just the next save without the entry — no per-entry delete case anymore).
+    private func syncTodayFood() {
+        persistLocalHistory()
+        let dayKey = DayKey.today
+        let snapshot = mealEntries
+        Task { await SyncQueue.shared.enqueue(.foodDay(dayKey: dayKey, entries: snapshot)) }
+    }
+
+    // FRG-383 — the device-local mirror of everything `loadHistoryFromCloudKit` would otherwise
+    // have to re-fetch; written on every history mutation, read back synchronously in `init`.
+    private func persistLocalHistory() {
+        LocalHistoryStore.save(LocalHistoryStore.Snapshot(
+            sessions: trailingSessions,
+            weighIns: bodyweightLogLb.map { BodyweightEntry(date: $0.date, weightLb: $0.weightLb) },
+            mealsDayKey: DayKey.today,
+            meals: mealEntries
+        ))
     }
 
     // FRG-130/131 — appends a new weigh-in; there was previously no UI path that ever grew
     // `bodyweightLogLb` past its single onboarding seed value.
     func logWeight(_ weightLb: Double) {
-        let entry = (date: Date(), weightLb: weightLb)
-        bodyweightLogLb.append(entry)
-        Task { await SyncQueue.shared.enqueue(.bodyweightEntry(date: entry.date, weightLb: entry.weightLb)) }
+        bodyweightLogLb.append((date: Date(), weightLb: weightLb))
+        persistLocalHistory()
+        let snapshot = bodyweightLogLb.map { BodyweightEntry(date: $0.date, weightLb: $0.weightLb) }
+        Task { await SyncQueue.shared.enqueue(.bodyweightLog(snapshot)) }
     }
 
     // Feature request — "users should be able to edit their current weight in the profile section
@@ -547,7 +585,12 @@ final class AppStore: ObservableObject {
         todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
 
-        Task { await SyncQueue.shared.enqueue(.workoutSession(session)) }
+        // FRG-383 — mirror locally first (relaunch-safe with zero network), then push the whole
+        // history; CloudKitStore unions by session id server-side, so this can't clobber
+        // anything a fetch hasn't seen yet.
+        persistLocalHistory()
+        let snapshot = trailingSessions
+        Task { await SyncQueue.shared.enqueue(.workoutSessions(snapshot)) }
         return session
     }
 
@@ -724,17 +767,46 @@ final class AppStore: ObservableObject {
 
     // FRG-130/131 — backfills history for a returning user; called once after construction
     // rather than from `init` so the synchronous init never blocks on a network round-trip.
+    // FRG-383 — every fetch merges (union by id/timestamp) with what's already in memory rather
+    // than replacing it, so a fetch can never wipe out something logged moments ago that hasn't
+    // round-tripped yet; and every failure is logged instead of silently swallowed, which is how
+    // the original "everything vanishes" bug stayed invisible for so long.
     func loadHistoryFromCloudKit() async {
-        async let sessions = try? CloudKitStore.shared.fetchWorkoutSessions()
-        async let weighIns = try? CloudKitStore.shared.fetchBodyweightLog()
-        async let todaysFood = try? CloudKitStore.shared.fetchFoodEntries(from: Calendar.current.startOfDay(for: Date()), to: Date())
+        async let sessionsFetch = CloudKitStore.shared.fetchAllWorkoutSessions()
+        async let weighInsFetch = CloudKitStore.shared.fetchBodyweightLog()
+        async let todaysFoodFetch = CloudKitStore.shared.fetchFoodDay(dayKey: DayKey.today)
         async let accountStatus = CloudKitStore.shared.accountStatus()
 
-        if let sessions = await sessions, !sessions.isEmpty { trailingSessions = sessions }
-        if let weighIns = await weighIns, !weighIns.isEmpty { bodyweightLogLb = weighIns }
-        if let todaysFood = await todaysFood { mealEntries = todaysFood }
+        do {
+            let fetched = try await sessionsFetch
+            let fetchedIDs = Set(fetched.map(\.id))
+            trailingSessions = (fetched + trailingSessions.filter { !fetchedIDs.contains($0.id) })
+                .sorted { $0.date < $1.date }
+        } catch {
+            print("[CloudKit] workout history fetch failed: \(error)")
+        }
+        do {
+            let fetched = try await weighInsFetch
+            let fetchedStamps = Set(fetched.map(\.date))
+            let localOnly = bodyweightLogLb.filter { !fetchedStamps.contains($0.date) }
+            bodyweightLogLb = (fetched.map { ($0.date, $0.weightLb) } + localOnly)
+                .sorted { $0.date < $1.date }
+        } catch {
+            print("[CloudKit] bodyweight fetch failed: \(error)")
+        }
+        do {
+            var merged = try await todaysFoodFetch
+            for meal in Meal.allCases {
+                let fetchedIDs = Set((merged[meal] ?? []).map(\.id))
+                merged[meal, default: []] += (mealEntries[meal] ?? []).filter { !fetchedIDs.contains($0.id) }
+            }
+            mealEntries = merged
+        } catch {
+            print("[CloudKit] today's food fetch failed: \(error)")
+        }
         cloudKitAccountStatus = await accountStatus
         refreshLastPerformance()
+        persistLocalHistory()
     }
 
     // Feature request — "make sure the app knows when we've moved on to the next week and day...
@@ -758,9 +830,12 @@ final class AppStore: ObservableObject {
         let staleExercises = todaysExercises
         let staleDayIndex = currentProgramDayIndex
         let staleWeek = activeWeek
-        // Fetch first: archiving appends to `trailingSessions`, and this fetch can overwrite it
-        // wholesale from CloudKit — doing it in this order means the archived session lands on
-        // top of fresh history instead of possibly being clobbered by a fetch that raced it.
+        // New day: yesterday's meals must be cleared *before* the fetch below, since
+        // loadHistoryFromCloudKit now merges (unions) into whatever's in memory — without this,
+        // yesterday's entries would leak into today's diary.
+        mealEntries = [.breakfast: [], .lunch: [], .dinner: [], .snacks: []]
+        // Fetch first: archiving appends to `trailingSessions`, and the archived session should
+        // land on top of freshly merged history rather than racing the fetch.
         await loadHistoryFromCloudKit()
         if archiveCompletedSession(exercises: staleExercises, dayIndex: staleDayIndex, week: staleWeek) != nil {
             persistProfile()
@@ -849,10 +924,17 @@ final class AppStore: ObservableObject {
         let dailyTargetCalories = NutritionTargetEngine.calculate(profile: profile, loadScore: 1.0).calories
         for dayOffset in 0..<7 {
             guard let day = calendar.date(byAdding: .day, value: -dayOffset, to: Date()) else { continue }
-            let startOfDay = calendar.startOfDay(for: day)
-            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? day
 
-            guard let dayFood = try? await CloudKitStore.shared.fetchFoodEntries(from: startOfDay, to: endOfDay) else { continue }
+            // Today reads straight from live in-memory state — always ahead of (or equal to) the
+            // server; past days come from their per-day CloudKit records (FRG-383).
+            let dayFood: [Meal: [FoodEntry]]
+            if dayOffset == 0 {
+                dayFood = mealEntries
+            } else if let fetched = try? await CloudKitStore.shared.fetchFoodDay(dayKey: DayKey.string(for: day)) {
+                dayFood = fetched
+            } else {
+                continue
+            }
             let kcalConsumed = dayFood.values.flatMap { $0 }.reduce(0) { $0 + $1.kcal }
             guard kcalConsumed > 0 else { continue }
 

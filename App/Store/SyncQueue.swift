@@ -8,87 +8,20 @@ import ForgeCore
 /// lost forever. `SyncQueue` is what "sync once connectivity returns" actually requires: failed
 /// writes persist to disk (survives the app being force-quit while offline, not just backgrounded)
 /// and retry automatically once the network comes back or the app returns to the foreground.
-enum PendingWrite {
+// Root-cause fix (FRG-383) — every case now carries the domain's *entire current state* rather
+// than a single entry, matching CloudKitStore's redesign onto fixed-ID whole-blob records (see
+// its header). That also makes queued retries self-coalescing: two queued writes of the same kind
+// are strictly redundant, so `coalesceIntoPending` below keeps only the newest. Per-entry delete
+// cases are gone — a delete is just the next whole-state save without the entry.
+// Synthesized Codable (all payloads are Codable); a persisted queue file from the old per-entry
+// format fails to decode and is discarded, which is safe — those writes targeted record types the
+// app no longer reads.
+enum PendingWrite: Codable {
     case profile(profile: UserProfile, program: ProgramTemplate, savedPrograms: [ProgramTemplate], dayIndex: Int, programStartDate: Date)
-    case workoutSession(WorkoutSession)
-    case foodEntry(entry: FoodEntry, meal: Meal)
-    case bodyweightEntry(date: Date, weightLb: Double)
-    // Feature request — "the foods logged also need to be editable and deletable." `foodEntry`
-    // above now upserts by the entry's own stable id (see CloudKitStore.saveFoodEntry), so it
-    // already covers edits; this covers the delete half.
-    case deleteFoodEntry(id: UUID)
-    // Bug fix — "my recipes weren't saved [after reinstall]... make sure that saves even if the
-    // app gets deleted." Same upsert-by-id / delete-by-id pattern as foodEntry above.
-    case recipe(Recipe)
-    case deleteRecipe(id: UUID)
-}
-
-// Manual Codable — Swift doesn't synthesize Codable for enums with associated values.
-extension PendingWrite: Codable {
-    private enum CodingKeys: String, CodingKey {
-        case type, profile, program, savedPrograms, dayIndex, programStartDate, session, entry, meal, date, weightLb, id, recipe
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .profile(let profile, let program, let savedPrograms, let dayIndex, let programStartDate):
-            try container.encode("profile", forKey: .type)
-            try container.encode(profile, forKey: .profile)
-            try container.encode(program, forKey: .program)
-            try container.encode(savedPrograms, forKey: .savedPrograms)
-            try container.encode(dayIndex, forKey: .dayIndex)
-            try container.encode(programStartDate, forKey: .programStartDate)
-        case .workoutSession(let session):
-            try container.encode("workoutSession", forKey: .type)
-            try container.encode(session, forKey: .session)
-        case .foodEntry(let entry, let meal):
-            try container.encode("foodEntry", forKey: .type)
-            try container.encode(entry, forKey: .entry)
-            try container.encode(meal, forKey: .meal)
-        case .bodyweightEntry(let date, let weightLb):
-            try container.encode("bodyweightEntry", forKey: .type)
-            try container.encode(date, forKey: .date)
-            try container.encode(weightLb, forKey: .weightLb)
-        case .deleteFoodEntry(let id):
-            try container.encode("deleteFoodEntry", forKey: .type)
-            try container.encode(id, forKey: .id)
-        case .recipe(let recipe):
-            try container.encode("recipe", forKey: .type)
-            try container.encode(recipe, forKey: .recipe)
-        case .deleteRecipe(let id):
-            try container.encode("deleteRecipe", forKey: .type)
-            try container.encode(id, forKey: .id)
-        }
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "profile":
-            self = .profile(
-                profile: try container.decode(UserProfile.self, forKey: .profile),
-                program: try container.decode(ProgramTemplate.self, forKey: .program),
-                savedPrograms: try container.decode([ProgramTemplate].self, forKey: .savedPrograms),
-                dayIndex: try container.decode(Int.self, forKey: .dayIndex),
-                programStartDate: try container.decode(Date.self, forKey: .programStartDate)
-            )
-        case "workoutSession":
-            self = .workoutSession(try container.decode(WorkoutSession.self, forKey: .session))
-        case "foodEntry":
-            self = .foodEntry(entry: try container.decode(FoodEntry.self, forKey: .entry), meal: try container.decode(Meal.self, forKey: .meal))
-        case "bodyweightEntry":
-            self = .bodyweightEntry(date: try container.decode(Date.self, forKey: .date), weightLb: try container.decode(Double.self, forKey: .weightLb))
-        case "deleteFoodEntry":
-            self = .deleteFoodEntry(id: try container.decode(UUID.self, forKey: .id))
-        case "recipe":
-            self = .recipe(try container.decode(Recipe.self, forKey: .recipe))
-        case "deleteRecipe":
-            self = .deleteRecipe(id: try container.decode(UUID.self, forKey: .id))
-        case let unknown:
-            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Unknown PendingWrite type: \(unknown)")
-        }
-    }
+    case workoutSessions([WorkoutSession])
+    case foodDay(dayKey: String, entries: [Meal: [FoodEntry]])
+    case bodyweightLog([BodyweightEntry])
+    case recipes([Recipe])
 }
 
 actor SyncQueue {
@@ -146,7 +79,7 @@ actor SyncQueue {
             // guessing (no iCloud account, a container/entitlement problem, a genuine network
             // error, etc). Visible in Xcode's console / device logs the next time this is run.
             print("[SyncQueue] write failed, queued for retry: \(error)")
-            pending.append(write)
+            coalesceIntoPending(write)
             persist()
         }
         await Self.endBackgroundTask(taskID)
@@ -179,19 +112,33 @@ actor SyncQueue {
         switch write {
         case .profile(let profile, let program, let savedPrograms, let dayIndex, let programStartDate):
             try await CloudKitStore.shared.saveProfile(profile, program: program, savedPrograms: savedPrograms, dayIndex: dayIndex, programStartDate: programStartDate)
-        case .workoutSession(let session):
-            try await CloudKitStore.shared.saveWorkoutSession(session)
-        case .foodEntry(let entry, let meal):
-            try await CloudKitStore.shared.saveFoodEntry(entry, meal: meal)
-        case .bodyweightEntry(let date, let weightLb):
-            try await CloudKitStore.shared.saveBodyweightEntry(date: date, weightLb: weightLb)
-        case .deleteFoodEntry(let id):
-            try await CloudKitStore.shared.deleteFoodEntry(id: id)
-        case .recipe(let recipe):
-            try await CloudKitStore.shared.saveRecipe(recipe)
-        case .deleteRecipe(let id):
-            try await CloudKitStore.shared.deleteRecipe(id: id)
+        case .workoutSessions(let sessions):
+            try await CloudKitStore.shared.saveAllWorkoutSessions(sessions)
+        case .foodDay(let dayKey, let entries):
+            try await CloudKitStore.shared.saveFoodDay(dayKey: dayKey, entries: entries)
+        case .bodyweightLog(let entries):
+            try await CloudKitStore.shared.saveBodyweightLog(entries)
+        case .recipes(let recipes):
+            try await CloudKitStore.shared.saveRecipes(recipes)
         }
+    }
+
+    // Whole-state writes make older queued writes of the same kind strictly redundant — a
+    // newer snapshot supersedes them entirely. Drop them so an extended offline stretch queues
+    // a handful of entries, not hundreds.
+    private func coalesceIntoPending(_ write: PendingWrite) {
+        pending.removeAll { existing in
+            switch (existing, write) {
+            case (.profile, .profile), (.workoutSessions, .workoutSessions),
+                 (.bodyweightLog, .bodyweightLog), (.recipes, .recipes):
+                return true
+            case (.foodDay(let existingKey, _), .foodDay(let newKey, _)):
+                return existingKey == newKey
+            default:
+                return false
+            }
+        }
+        pending.append(write)
     }
 
     private func persist() {

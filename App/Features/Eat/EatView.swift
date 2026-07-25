@@ -119,9 +119,9 @@ struct EatView: View {
         }
         .task(id: dayOffset) {
             guard !isToday else { historicalEntries = nil; return }
-            let start = Calendar.current.startOfDay(for: viewingDate)
-            let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? viewingDate
-            historicalEntries = try? await CloudKitStore.shared.fetchFoodEntries(from: start, to: end)
+            // FRG-383 — a past day is one fixed-ID record, fetched directly (no query, no
+            // Dashboard index dependency).
+            historicalEntries = try? await CloudKitStore.shared.fetchFoodDay(dayKey: DayKey.string(for: viewingDate))
         }
         .sheet(item: $searchingMeal) { meal in
             FoodSearchView(meal: meal)

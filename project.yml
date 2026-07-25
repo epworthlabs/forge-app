@@ -58,6 +58,15 @@ targets:
         # qualifies for App Store Connect's export compliance exemption. Setting it explicitly
         # skips the encryption questionnaire on every future TestFlight/App Store upload.
         ITSAppUsesNonExemptEncryption: false
+        # Custom fonts (App/Fonts) — registered here, not by editing App/Info.plist directly:
+        # xcodegen regenerates that plist from this block, so a hand-edit there is silently wiped
+        # by the next `xcodegen generate` (which is exactly what happened once).
+        UIAppFonts:
+          - Inter-Regular.ttf
+          - Inter-Medium.ttf
+          - Inter-SemiBold.ttf
+          - Inter-Bold.ttf
+          - Inter-ExtraBold.ttf
     entitlements:
       path: App/Forge.entitlements
       properties:

@@ -49,12 +49,18 @@ enum CSVExporter {
 
     private static func nutritionCSV(store: AppStore) async -> String {
         var rows = ["date,meal,food,kcal,protein_g,carb_g,fat_g"]
-        let end = Date()
-        let start = Calendar.current.date(byAdding: .year, value: -5, to: end) ?? Date.distantPast
+        // FRG-383 — history is now stored as one record per day, fetched by ID in batches (no
+        // query). A year's window covers realistic history; extend if the app outlives it.
+        let dayKeys = (0..<365).compactMap { offset -> String? in
+            guard let day = Calendar.current.date(byAdding: .day, value: -offset, to: Date()) else { return nil }
+            return DayKey.string(for: day)
+        }
         var byID: [FoodEntry.ID: (meal: Meal, entry: FoodEntry)] = [:]
-        if let historical = try? await CloudKitStore.shared.fetchFoodEntries(from: start, to: end) {
-            for meal in Meal.allCases {
-                for entry in historical[meal] ?? [] { byID[entry.id] = (meal, entry) }
+        if let historical = try? await CloudKitStore.shared.fetchFoodDays(dayKeys: dayKeys) {
+            for dayEntries in historical.values {
+                for meal in Meal.allCases {
+                    for entry in dayEntries[meal] ?? [] { byID[entry.id] = (meal, entry) }
+                }
             }
         }
         // Today's live in-memory state wins over the CloudKit snapshot above — authoritative for
