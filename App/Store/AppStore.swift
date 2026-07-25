@@ -1,4 +1,5 @@
 import Foundation
+import CloudKit
 import ForgeCore
 
 struct LoggedSet: Identifiable, Equatable, Codable {
@@ -95,6 +96,13 @@ final class AppStore: ObservableObject {
     // got recomputed by explicit user actions. Tracked here so `refreshForNewDayIfNeeded()` (called
     // from `MainTabView`'s scenePhase-active hook) has something to compare "now" against.
     private var lastKnownDate = Date()
+
+    // Bug fix — "the workouts/weight/recipes I logged are gone after a day rolls over or I
+    // reinstall." Previously invisible: nothing checked whether iCloud was even available before
+    // trying to sync, so a device with no signed-in account (or a restricted/degraded one) just
+    // silently lost every write with zero indication why. Checked once at launch (see
+    // `loadHistoryFromCloudKit`) and surfaced as a warning in You — see `YouView`.
+    @Published private(set) var cloudKitAccountStatus: CKAccountStatus = .couldNotDetermine
 
     @Published var trailingSessions: [WorkoutSession] = []
     // Bug fix — persisted on every change so in-progress (checked-off but not yet Finished) work
@@ -720,10 +728,12 @@ final class AppStore: ObservableObject {
         async let sessions = try? CloudKitStore.shared.fetchWorkoutSessions()
         async let weighIns = try? CloudKitStore.shared.fetchBodyweightLog()
         async let todaysFood = try? CloudKitStore.shared.fetchFoodEntries(from: Calendar.current.startOfDay(for: Date()), to: Date())
+        async let accountStatus = CloudKitStore.shared.accountStatus()
 
         if let sessions = await sessions, !sessions.isEmpty { trailingSessions = sessions }
         if let weighIns = await weighIns, !weighIns.isEmpty { bodyweightLogLb = weighIns }
         if let todaysFood = await todaysFood { mealEntries = todaysFood }
+        cloudKitAccountStatus = await accountStatus
         refreshLastPerformance()
     }
 

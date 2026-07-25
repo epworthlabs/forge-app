@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CloudKit
 import ForgeCore
 
 struct YouView: View {
@@ -14,6 +15,12 @@ struct YouView: View {
     @State private var isPreparingExport = false
     @State private var exportedFiles: [URL] = []
     @State private var showingExportSheet = false
+    // Bug fix — same investigation as the iCloud-account banner below: an available account
+    // doesn't guarantee writes are actually reaching CloudKit (a container/entitlement problem
+    // would still fail every write while reporting `.available`). A growing, never-shrinking
+    // pending count is the visible symptom of that — checked once per visit since `SyncQueue`
+    // has no other way to push updates out.
+    @State private var pendingSyncCount = 0
 
     var body: some View {
         ZStack {
@@ -21,6 +28,39 @@ struct YouView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("You").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
+
+                    // Bug fix — "the workouts/weight/recipes I logged are gone after a day rolls
+                    // over or I reinstall." The single most common reason CloudKit silently does
+                    // nothing is no iCloud account signed in (or a restricted one) — previously
+                    // invisible, since nothing checked or surfaced it, so data just vanished with
+                    // no explanation. This is that explanation, whenever it applies.
+                    if store.cloudKitAccountStatus != .available && store.cloudKitAccountStatus != .couldNotDetermine {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.icloud.fill")
+                                .foregroundStyle(ForgeColors.accent).font(.system(size: 18))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("iCloud sync isn't available").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                Text(cloudKitStatusMessage).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                            }
+                        }
+                        .padding(14)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(ForgeColors.accent.opacity(0.4)))
+                    } else if pendingSyncCount > 0 {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.icloud.fill")
+                                .foregroundStyle(ForgeColors.accent).font(.system(size: 18))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(pendingSyncCount) change\(pendingSyncCount == 1 ? "" : "s") not yet synced").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                Text("iCloud looks available, but some saves are stuck retrying — check your connection.").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                            }
+                        }
+                        .padding(14)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(ForgeColors.accent.opacity(0.4)))
+                    }
 
                     // Feature request — "give a default avatar and assign a randomly generated
                     // username at the top. Let users edit those two fields if they want."
@@ -156,6 +196,20 @@ struct YouView: View {
             // Returning users with Health sync already on: refresh on each visit rather than
             // only right after the toggle flips.
             if healthSyncEnabled { await store.syncHealthKit() }
+            pendingSyncCount = await SyncQueue.shared.pendingCount
+        }
+    }
+
+    private var cloudKitStatusMessage: String {
+        switch store.cloudKitAccountStatus {
+        case .noAccount:
+            return "Sign in to iCloud in Settings so your data syncs and survives a reinstall."
+        case .restricted:
+            return "iCloud is restricted on this device (e.g. by Screen Time or a managed profile)."
+        case .temporarilyUnavailable:
+            return "iCloud is temporarily unavailable — this usually resolves on its own."
+        default:
+            return "Your data is only stored on this device until iCloud is available."
         }
     }
 }

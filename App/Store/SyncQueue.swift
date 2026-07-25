@@ -141,6 +141,11 @@ actor SyncQueue {
         do {
             try await perform(write)
         } catch {
+            // Bug fix — every failure here used to be swallowed with no trace at all, so there
+            // was no way to actually confirm *why* a write never reached CloudKit versus just
+            // guessing (no iCloud account, a container/entitlement problem, a genuine network
+            // error, etc). Visible in Xcode's console / device logs the next time this is run.
+            print("[SyncQueue] write failed, queued for retry: \(error)")
             pending.append(write)
             persist()
         }
@@ -159,6 +164,7 @@ actor SyncQueue {
             do {
                 try await perform(write)
             } catch {
+                print("[SyncQueue] retry failed, still queued: \(error)")
                 remaining.append(write)
             }
         }

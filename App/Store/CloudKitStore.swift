@@ -21,6 +21,19 @@ actor CloudKitStore {
 
     private init() {}
 
+    // Bug fix — "the workouts/weight/recipes I logged are gone after a day rolls over or I
+    // reinstall." Every save/fetch in this file has always swallowed its error via `try?` at the
+    // call site, so there was never any visibility into *why* a write didn't reach CloudKit —
+    // every previous fix in this area was a guess at the cause, not a confirmed diagnosis. The
+    // single most common reason CloudKit silently does nothing: no iCloud account signed in on the
+    // device (or restricted/degraded in some way) — `enqueue`/`flush` still "succeed" from the
+    // app's point of view (nothing throws until the actual network call), so nothing in the UI
+    // ever surfaced this. Exposed so the app can check it directly and warn rather than silently
+    // losing data with no explanation.
+    func accountStatus() async -> CKAccountStatus {
+        (try? await container.accountStatus()) ?? .couldNotDetermine
+    }
+
     // MARK: Profile — a single fixed-ID record, upserted in place rather than queried.
 
     private static let profileRecordID = CKRecord.ID(recordName: "profile")
