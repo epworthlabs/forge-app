@@ -78,7 +78,7 @@ struct TrainSessionView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(store.program.name) · \(store.currentProgramDayName)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                            Text("Log Workout").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                            Text("Log Workout").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
                         }
                         Spacer()
                         // Feature request — "editable timeframe... customize or copy over to
@@ -115,10 +115,9 @@ struct TrainSessionView: View {
                         onFinished()
                     } label: {
                         Text("Finish Workout").font(ForgeType.title).frame(maxWidth: .infinity)
-                            .padding(18).foregroundStyle(Color.white).background(ForgeColors.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .padding(18).foregroundStyle(Color.white)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LiquidPrimaryButtonStyle())
                     .disabled(!store.todaysExercises.contains { $0.sets.contains(where: \.done) })
                 }
                 .padding(20)
@@ -219,10 +218,9 @@ private struct RestDurationSheet: View {
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(16).foregroundStyle(Color.white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(LiquidPrimaryButtonStyle())
         }
         .padding(22)
         .presentationDetents([.height(320)])
@@ -248,11 +246,36 @@ private struct ExerciseCard: View {
     var onLineupChanged: () -> Void
     @State private var suggestionDismissed = false
     @State private var swappingExercise = false
+    // Bug fix — "the reordering function is janky... when you drag it should have a ghost of the
+    // card." A subtle lift + highlight while something's being dragged over this card, so the
+    // reorder reads as a live, physical gesture instead of a silent no-feedback swap on drop.
+    @State private var isDropTarget = false
 
     var body: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
+                    // Feature request — "rearrange exercises under workouts." Drag source is just
+                    // this handle (not the whole card) so it can't be confused with the taps
+                    // already happening everywhere else in the card (set rows, menu, swap sheet).
+                    // Bug fix — a custom `preview` (rather than the default, which would just drag
+                    // a snapshot of this tiny icon) gives the drag an actual card-shaped ghost.
+                    // Bug fix — "when I press on the reordering grip, give haptic feedback." A
+                    // previous attempt used a `simultaneousGesture(DragGesture(minimumDistance: 0))`
+                    // on this same view to catch touch-down — that competed with `.draggable`'s
+                    // own touch recognition for the same events and broke dragging entirely (it
+                    // never got to start). The `preview` closure below is only ever evaluated by
+                    // the system once a drag session actually begins, so firing the haptic from
+                    // its `onAppear` gets the same "ready to be moved" moment with nothing to
+                    // conflict with.
+                    Image(systemName: "line.3.horizontal")
+                        .foregroundStyle(ForgeColors.inkMuted).font(.system(size: 14))
+                        .frame(width: 28, height: 44)
+                        .contentShape(Rectangle())
+                        .draggable(slot.id.uuidString) {
+                            ExerciseDragPreview(name: slot.exercise.name)
+                                .onAppear { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+                        }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(slot.exercise.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                         Text("\(slot.targetSets)×\(slot.targetReps) @ \(WeightUnit.roundedLb(fromKg: slot.targetWeightKg)) lb")
@@ -260,6 +283,19 @@ private struct ExerciseCard: View {
                     }
                     Spacer()
                     Menu {
+                        // Feature request — "add a move to bottom button in the ... menu item and
+                        // move to top button as well."
+                        Button {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                                store.moveExerciseToTop(exerciseID: slot.id)
+                            }
+                        } label: { Label("Move to Top", systemImage: "arrow.up.to.line") }
+                        Button {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                                store.moveExerciseToBottom(exerciseID: slot.id)
+                            }
+                        } label: { Label("Move to Bottom", systemImage: "arrow.down.to.line") }
+                        Divider()
                         Button("Swap Exercise") { swappingExercise = true }
                         Button("Remove Exercise", role: .destructive) {
                             store.removeExercise(exerciseID: slot.id)
@@ -301,12 +337,44 @@ private struct ExerciseCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scaleEffect(isDropTarget ? 1.02 : 1)
+        .animation(.easeOut(duration: 0.15), value: isDropTarget)
+        .dropDestination(for: String.self) { items, _ in
+            guard let draggedIDString = items.first, let draggedID = UUID(uuidString: draggedIDString) else { return false }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                store.moveExercise(id: draggedID, near: slot.id)
+            }
+            onLineupChanged()
+            return true
+        } isTargeted: { targeted in
+            isDropTarget = targeted
+        }
         .sheet(isPresented: $swappingExercise) {
             ExercisePickerSheet { exercise in
                 store.swapExercise(exerciseID: slot.id, with: exercise)
                 onLineupChanged()
             }
         }
+    }
+}
+
+/// Bug fix — "when you drag it should have a ghost of the card that is being dragged." The
+/// system's default `.draggable` preview is just a screenshot of whatever view the modifier is
+/// attached to — since the drag source is the small grip icon (see `ExerciseCard`), that default
+/// would drag a tiny icon-sized ghost. This is a purpose-built stand-in that actually reads as
+/// "the exercise card, lifted." Not `private` — `ProgramEditorView`'s exercise reordering reuses
+/// it for the exact same reason.
+struct ExerciseDragPreview: View {
+    let name: String
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal").foregroundStyle(ForgeColors.inkMuted).font(.system(size: 13))
+            Text(name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
     }
 }
 
@@ -320,10 +388,11 @@ private struct SuggestionCard: View {
             Text("SUGGESTED NEXT SET").font(ForgeType.label).foregroundStyle(ForgeColors.accent)
             Text("\(WeightUnit.roundedLb(fromKg: suggestion.weightKg)) lb × \(suggestion.reps)").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
             HStack(spacing: 10) {
-                Button("Accept", action: onAccept)
-                    .font(ForgeType.body).foregroundStyle(Color.white)
-                    .padding(.horizontal, 18).padding(.vertical, 10)
-                    .background(ForgeColors.accent).clipShape(Capsule())
+                Button(action: onAccept) {
+                    Text("Accept").font(ForgeType.body).foregroundStyle(Color.white)
+                        .padding(.horizontal, 18).padding(.vertical, 10)
+                }
+                .buttonStyle(LiquidPrimaryButtonStyle(cornerRadius: nil))
                 Button("Dismiss", action: onDismiss)
                     .font(ForgeType.body).foregroundStyle(ForgeColors.inkMuted)
                     .padding(.horizontal, 18).padding(.vertical, 10)
@@ -431,26 +500,32 @@ private struct WeightNumberField: View {
 
             HStack(spacing: 3) {
                 TextField("", text: $text)
-                    .keyboardType(.numberPad)
+                    .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 34)
+                    .frame(width: 42)
                     .focused($isFocused)
-                    .onAppear { text = String(Int(weightLb.rounded())) }
+                    .onAppear { text = WeightUnit.trimmedDecimal(weightLb) }
                     .onChange(of: weightLb) { newValue in
-                        if !isFocused { text = String(Int(newValue.rounded())) }
+                        if !isFocused { text = WeightUnit.trimmedDecimal(newValue) }
                     }
                     .onChange(of: isFocused) { focused in
                         if focused {
                             text = ""
                         } else if text.isEmpty {
-                            text = String(Int(weightLb.rounded()))
+                            text = WeightUnit.trimmedDecimal(weightLb)
                         }
                     }
+                    // Feature request — "need to be able to input decimals into weights" (plate
+                    // math like 62.5/135.5 lb) — digits plus a single "." now, not digits-only.
                     .onChange(of: text) { newText in
-                        let digits = newText.filter(\.isNumber)
-                        if digits != newText { text = digits }
-                        guard let parsed = Double(digits) else { return }
+                        var filtered = newText.filter { $0.isNumber || $0 == "." }
+                        if let firstDot = filtered.firstIndex(of: "."), filtered.filter({ $0 == "." }).count > 1 {
+                            let afterFirstDot = filtered.index(after: firstDot)
+                            filtered = String(filtered[..<afterFirstDot]) + filtered[afterFirstDot...].filter { $0 != "." }
+                        }
+                        if filtered != newText { text = filtered }
+                        guard let parsed = Double(filtered) else { return }
                         weightLb = min(1100, max(0, parsed))
                     }
                 Text("lb").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)

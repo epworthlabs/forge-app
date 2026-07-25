@@ -5,9 +5,9 @@ import Foundation
 /// No account system exists (Sign in with Apple is disconnected, CloudKit is per-iCloud-account
 /// private data), so codes are generated client-side and redemption state lives in the FoodProxy
 /// backend already deployed for FatSecret (`FoodProxy/server.js`'s `/referral` endpoints) rather
-/// than standing up a new service. Not wired to a real tappable deep link yet — the app isn't on
-/// TestFlight/App Store, so there's nowhere for a link to actually open. The "link" for now is a
-/// shareable invite code the referred person types in at the end of onboarding.
+/// than standing up a new service. The invite code the referred person types in at the end of
+/// onboarding is still the actual redemption mechanism — `Secrets.appStoreURL` just adds a real
+/// tappable link to *get* the app in the first place, once one exists (see that doc comment).
 @MainActor
 final class ReferralManager: ObservableObject {
     static let shared = ReferralManager()
@@ -36,7 +36,9 @@ final class ReferralManager: ObservableObject {
     }
 
     var shareMessage: String {
-        "I'm using Trakt to track my lifts and nutrition — join me! Download the app, then enter invite code \(myCode) when you finish setting up your profile."
+        let base = "I'm using Trakt to track my lifts and nutrition — join me! Download the app, then enter invite code \(myCode) when you finish setting up your profile."
+        guard let url = Secrets.appStoreURL, !url.isEmpty else { return base }
+        return "\(base) \(url)"
     }
 
     // Excludes 0/O/1/I so a typed-in code from a text message isn't ambiguous.

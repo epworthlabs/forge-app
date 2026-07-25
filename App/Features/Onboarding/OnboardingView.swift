@@ -87,17 +87,26 @@ private struct ContinueButton: View {
     let enabled: Bool
     let action: () -> Void
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(ForgeType.title)
-                .frame(maxWidth: .infinity)
-                .padding(16)
-                .foregroundStyle(enabled ? Color.white : ForgeColors.inkMuted)
-                .background(enabled ? ForgeColors.accent : ForgeColors.cardBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        // Feature request — "give the... buttons a bit more of a liquid-glass look." Kept as two
+        // branches (rather than conditionally swapping just the background) since the disabled
+        // state intentionally stays a flat, muted "nothing to tap yet" look — the glass/gradient
+        // treatment is for the enabled, tappable state.
+        if enabled {
+            Button(action: action) {
+                Text(title).font(ForgeType.title).frame(maxWidth: .infinity)
+                    .padding(16).foregroundStyle(Color.white)
+            }
+            .buttonStyle(LiquidPrimaryButtonStyle())
+        } else {
+            Button(action: action) {
+                Text(title).font(ForgeType.title).frame(maxWidth: .infinity)
+                    .padding(16).foregroundStyle(ForgeColors.inkMuted)
+                    .background(ForgeColors.cardBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(true)
         }
-        .disabled(!enabled)
-        .buttonStyle(.plain)
     }
 }
 
@@ -395,10 +404,8 @@ private struct ProgramSelectStep: View {
             // Optional — most people arrive without one.
             VStack(alignment: .leading, spacing: 6) {
                 Text("Invite code (optional)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                TextField("e.g. 7K2P9Q", text: $inviteCode)
-                    .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
+                SelectAllTextField(text: $inviteCode, placeholder: "e.g. 7K2P9Q", autocapitalization: .allCharacters, autocorrection: .no)
+                    .frame(maxWidth: .infinity)
                     .padding(12)
                     .background(ForgeColors.cardBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))

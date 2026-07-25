@@ -52,11 +52,17 @@ public actor FoodSearchService {
         let usda = (await usdaResults) ?? []
         let off = (await offResults) ?? []
         let fs = (await fatSecretResults) ?? []
+        // "Add to my food database" — a local, zero-latency, developer-curated source (see
+        // `CuratedFoodLibrary`). Checked first: the dedup below keeps whichever copy of a given
+        // food it sees first, so a curated entry wins over a same-named live-API result — the
+        // point of curating it in the first place.
+        let curated = CuratedFoodLibrary.search(normalizedQuery)
 
-        // Open Food Facts first: best barcode/packaged-food coverage, most likely to match what a
-        // user actually scans or searches for day to day. USDA next for generic/whole foods.
-        // FatSecret last as the paid-tier fallback for search gaps (PRD food-database decision).
-        var combined = off + usda + fs
+        // Open Food Facts first (of the live sources): best barcode/packaged-food coverage, most
+        // likely to match what a user actually scans or searches for day to day. USDA next for
+        // generic/whole foods. FatSecret last as the paid-tier fallback for search gaps (PRD
+        // food-database decision).
+        var combined = curated + off + usda + fs
         var seen = Set<String>()
         combined = combined.filter { seen.insert("\($0.name.lowercased())|\($0.brand?.lowercased() ?? "")").inserted }
 

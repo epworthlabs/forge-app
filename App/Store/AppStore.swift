@@ -1,7 +1,7 @@
 import Foundation
 import ForgeCore
 
-struct LoggedSet: Identifiable, Equatable {
+struct LoggedSet: Identifiable, Equatable, Codable {
     let id = UUID()
     var weightKg: Double
     var reps: Int
@@ -9,7 +9,7 @@ struct LoggedSet: Identifiable, Equatable {
     var done: Bool = false
 }
 
-struct ExerciseSlot: Identifiable, Equatable {
+struct ExerciseSlot: Identifiable, Equatable, Codable {
     let id = UUID()
     var exercise: Exercise
     var targetSets: Int
@@ -97,7 +97,16 @@ final class AppStore: ObservableObject {
     private var lastKnownDate = Date()
 
     @Published var trailingSessions: [WorkoutSession] = []
-    @Published var todaysExercises: [ExerciseSlot]
+    // Bug fix — persisted on every change so in-progress (checked-off but not yet Finished) work
+    // survives a cold relaunch and an overnight day rollover instead of silently vanishing — see
+    // `WorkoutDraftStore` and `resumeOrArchiveDraftIfNeeded()`.
+    @Published var todaysExercises: [ExerciseSlot] {
+        didSet {
+            WorkoutDraftStore.save(WorkoutDraft(
+                date: Date(), programDayIndex: currentProgramDayIndex, programWeek: activeWeek, exercises: todaysExercises
+            ))
+        }
+    }
     // FRG-111 — a Date, not a countdown Int: computing "remaining = end − now" fresh each tick is
     // what makes this correct across backgrounding. A stored countdown would just freeze in the
     // background and read stale (in fact wrong) the moment the app returns to the foreground.
@@ -302,8 +311,17 @@ final class AppStore: ObservableObject {
     /// training program, denote that specific workout was completed for the week." Which day
     /// indices (within `week`) already have a logged session, so DayTile can show a completed
     /// badge and the suggestion below can skip past them.
+    ///
+    /// Bug fix — "when I mark off the first workout in a program, it marks off the first workout
+    /// in other programs too." Also matching on `programID` now, not just week/day — two different
+    /// programs' Week 1/Day 0 are otherwise indistinguishable. A `nil` programID (a session logged
+    /// before this field existed) is treated as belonging to whichever program is active right now
+    /// rather than excluded outright, so existing completion history isn't silently lost.
     func completedDayIndices(forWeek week: Int) -> Set<Int> {
-        Set(trailingSessions.compactMap { $0.programWeek == week ? $0.programDayIndex : nil })
+        Set(trailingSessions.compactMap {
+            guard $0.programWeek == week, $0.programID == nil || $0.programID == program.id else { return nil }
+            return $0.programDayIndex
+        })
     }
 
     /// Feature request — "suggest the next workout depending on the week and what has already
@@ -484,20 +502,29 @@ final class AppStore: ObservableObject {
         persistProfile()
     }
 
-    // FRG-130/131 — archives today's completed sets into training history and resets the slate
-    // for next time. There was previously no path that ever appended to `trailingSessions`, so
+    // FRG-130/131 — archives completed sets into training history and rotates to the next
+    // suggested day. There was previously no path that ever appended to `trailingSessions`, so
     // Load Score never actually changed session to session for a real user.
-    func finishWorkout() {
-        let completedSets = todaysExercises.flatMap { slot in
+    //
+    // Bug fix — pulled out of `finishWorkout()` so the exact same archive-and-advance logic can
+    // also run automatically when a day boundary is crossed with checked-off-but-never-Finished
+    // sets sitting around (see `refreshForNewDayIfNeeded` and `resumeOrArchiveDraftIfNeeded`),
+    // instead of just discarding them. Takes `exercises`/`dayIndex`/`week` as parameters rather
+    // than reading `todaysExercises`/`currentProgramDayIndex`/`activeWeek` directly because the
+    // draft-recovery caller archives a *previous* day's snapshot, not whatever's currently loaded.
+    @discardableResult
+    private func archiveCompletedSession(exercises: [ExerciseSlot], dayIndex: Int, week: Int) -> WorkoutSession? {
+        let completedSets = exercises.flatMap { slot in
             slot.sets.filter(\.done).map { SetLog(weightKg: $0.weightKg, reps: $0.reps, rpe: $0.rpe, exerciseName: slot.exercise.name) }
         }
-        guard !completedSets.isEmpty else { return }
+        guard !completedSets.isEmpty else { return nil }
 
         // Feature request — "denote that specific workout was completed for the week." Tagged
-        // with whichever day/week was actually being trained (`activeWeek`, not necessarily the
-        // real current week — see `selectDay`), so completion tracking is correct even when
-        // catching up on a different week.
-        let session = WorkoutSession(date: Date(), sets: completedSets, programDayIndex: currentProgramDayIndex, programWeek: activeWeek)
+        // with whichever day/week was actually being trained, not necessarily the real current
+        // week (see `selectDay`), so completion tracking is correct even when catching up on a
+        // different week. Also tagged with the active program's id — bug fix, "when I mark off
+        // the first workout in a program, it marks off the first workout in other programs too."
+        let session = WorkoutSession(date: Date(), sets: completedSets, programDayIndex: dayIndex, programWeek: week, programID: program.id)
         trailingSessions.append(session)
         // Feature request — congratulatory screen + review, reads this.
         lastCompletedSession = session
@@ -513,6 +540,11 @@ final class AppStore: ObservableObject {
         refreshLastPerformance()
 
         Task { await SyncQueue.shared.enqueue(.workoutSession(session)) }
+        return session
+    }
+
+    func finishWorkout() {
+        guard archiveCompletedSession(exercises: todaysExercises, dayIndex: currentProgramDayIndex, week: activeWeek) != nil else { return }
         persistProfile()
     }
 
@@ -613,6 +645,43 @@ final class AppStore: ObservableObject {
         todaysExercises.removeAll { $0.id == exerciseID }
     }
 
+    // Bug fix — "when we move it, I want it more responsive: if I drag the gripped card on top of
+    // another card, it should immediately go above it if it's currently below, or below it if
+    // it's currently above." The old version always inserted the dragged card immediately
+    // *before* the target — correct for dragging upward (the dragged card was below, ends up
+    // above, matching the request), but for dragging downward it always stopped one slot short of
+    // where the target actually was instead of passing it, which read as sluggish/unresponsive.
+    // Direction is inferred from the two cards' positions *before* the move: dragging downward
+    // (dragged was above target) inserts *after* the target; dragging upward (dragged was below)
+    // inserts *before* it, same as always. No-op if either side of the drag isn't found (e.g. the
+    // dragged card was removed mid-gesture) rather than crashing.
+    func moveExercise(id: ExerciseSlot.ID, near targetID: ExerciseSlot.ID) {
+        guard id != targetID,
+              let fromIndex = todaysExercises.firstIndex(where: { $0.id == id }),
+              let targetIndexBeforeMove = todaysExercises.firstIndex(where: { $0.id == targetID }) else { return }
+        let draggingDown = fromIndex < targetIndexBeforeMove
+        let slot = todaysExercises.remove(at: fromIndex)
+        guard let targetIndex = todaysExercises.firstIndex(where: { $0.id == targetID }) else {
+            todaysExercises.insert(slot, at: min(fromIndex, todaysExercises.count))
+            return
+        }
+        todaysExercises.insert(slot, at: draggingDown ? targetIndex + 1 : targetIndex)
+    }
+
+    // Feature request — "let's also add a move to bottom button in the ... menu item and move to
+    // top button as well."
+    func moveExerciseToTop(exerciseID: ExerciseSlot.ID) {
+        guard let index = todaysExercises.firstIndex(where: { $0.id == exerciseID }), index != 0 else { return }
+        let slot = todaysExercises.remove(at: index)
+        todaysExercises.insert(slot, at: 0)
+    }
+
+    func moveExerciseToBottom(exerciseID: ExerciseSlot.ID) {
+        guard let index = todaysExercises.firstIndex(where: { $0.id == exerciseID }), index != todaysExercises.count - 1 else { return }
+        let slot = todaysExercises.remove(at: index)
+        todaysExercises.append(slot)
+    }
+
     func addExercise(_ exercise: Exercise, targetSets: Int = 3, targetReps: Int = 8) {
         let seedWeight = mostRecentSet(for: exercise.name)?.weightKg ?? WeightUnit.kg(fromLb: 45)
         let slot = ExerciseSlot(exercise: exercise, targetSets: targetSets, targetReps: targetReps, targetWeightKg: seedWeight,
@@ -672,10 +741,49 @@ final class AppStore: ObservableObject {
     func refreshForNewDayIfNeeded() async {
         guard !Calendar.current.isDate(lastKnownDate, inSameDayAs: Date()) else { return }
         lastKnownDate = Date()
+        // Bug fix — "the workout that's checked off gets unchecked and resets... the calendar
+        // isn't marking the days off either." Snapshot whatever's currently checked off *before*
+        // the rebuild below discards it — if the day rolled over while the app sat backgrounded
+        // mid-session, that's real completed work that was never explicitly Finished, not nothing.
+        let staleExercises = todaysExercises
+        let staleDayIndex = currentProgramDayIndex
+        let staleWeek = activeWeek
+        // Fetch first: archiving appends to `trailingSessions`, and this fetch can overwrite it
+        // wholesale from CloudKit — doing it in this order means the archived session lands on
+        // top of fresh history instead of possibly being clobbered by a fetch that raced it.
         await loadHistoryFromCloudKit()
-        activeWeek = currentProgramWeek
-        todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: currentProgramDayIndex)
-        refreshLastPerformance()
+        if archiveCompletedSession(exercises: staleExercises, dayIndex: staleDayIndex, week: staleWeek) != nil {
+            persistProfile()
+        } else {
+            activeWeek = currentProgramWeek
+            todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: currentProgramDayIndex)
+            refreshLastPerformance()
+        }
+    }
+
+    // Bug fix — the cold-launch counterpart to `refreshForNewDayIfNeeded` above: a day boundary
+    // crossed while the app wasn't running at all never went through that live-foreground check,
+    // so checked-off sets from a session that was never Finished were silently lost on next
+    // launch with no record of them anywhere. Call once after `loadHistoryFromCloudKit()` so an
+    // archived session lands on top of fresh history rather than racing it (same reasoning as
+    // `refreshForNewDayIfNeeded`).
+    func resumeOrArchiveDraftIfNeeded() async {
+        guard let draft = WorkoutDraftStore.load() else { return }
+        // Same slot as what's currently loaded (today, same program day/week) — a same-day
+        // relaunch, not a rollover. Restore it so a cold launch mid-workout doesn't wipe progress
+        // `init`'s fresh rebuild already discarded in memory.
+        let isCurrentSlot = Calendar.current.isDateInToday(draft.date)
+            && draft.programDayIndex == currentProgramDayIndex && draft.programWeek == activeWeek
+        if isCurrentSlot {
+            todaysExercises = draft.exercises
+            return
+        }
+        // Anything else — a previous day, or a slot that's no longer current (e.g. a different
+        // day/program was selected since) — archive whatever was checked off under it rather than
+        // just dropping it. No-op if nothing was actually checked off.
+        if archiveCompletedSession(exercises: draft.exercises, dayIndex: draft.programDayIndex, week: draft.programWeek) != nil {
+            persistProfile()
+        }
     }
 
     // FRG-306 — re-evaluates tonight's reminders against current state; call on toggle-enable and

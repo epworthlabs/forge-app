@@ -24,10 +24,16 @@ struct FoodSearchView: View {
     @Environment(\.dismiss) private var dismiss
     let meal: Meal
 
+    @ObservedObject private var customFoods = CustomFoodStore.shared
+    @ObservedObject private var recipes = RecipeStore.shared
+
     @State private var query = ""
     @State private var results: [FoodSearchResult] = []
     @State private var isSearching = false
     @State private var confirmingFood: FoodSearchResult?
+    @State private var addingCustomFood = false
+    @State private var buildingRecipe = false
+    @State private var viewingMyRecipes = false
 
     // Feature request — "make searching for food items even more robust." Rendering every result
     // eagerly in a plain VStack meant a broad query laid out hundreds of rows at once; capping to
@@ -41,11 +47,42 @@ struct FoodSearchView: View {
                 ForgeColors.backgroundWash
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        TextField("Search…", text: $query)
-                            .font(ForgeType.body)
+                        SelectAllTextField(text: $query, placeholder: "Search…")
+                            .frame(maxWidth: .infinity)
                             .padding(10)
                             .background(.ultraThinMaterial)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                        // Feature request — "add their own foods on their own devices" + "group a
+                        // collection of foods and save + input it as a recipe." Always available,
+                        // not just on an empty search.
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Button { addingCustomFood = true } label: {
+                                    Text("+ Add Food").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                                }
+                                .buttonStyle(LiquidChipButtonStyle())
+                                Button { buildingRecipe = true } label: {
+                                    Text("+ Create a recipe").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                                }
+                                .buttonStyle(LiquidChipButtonStyle())
+                                // Feature request — "give users a more accessible way to log their
+                                // own saved recipes, they shouldn't have to search for it, it
+                                // should be in a separate folder/bookmark." A direct list, not
+                                // routed through the search-results merge below — only shown once
+                                // there's something to browse.
+                                if !recipes.recipes.isEmpty {
+                                    Button { viewingMyRecipes = true } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "bookmark.fill")
+                                            Text("My Recipes")
+                                        }
+                                        .font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+                                    }
+                                    .buttonStyle(LiquidChipButtonStyle())
+                                }
+                            }
+                        }
 
                         if query.isEmpty {
                             // Feature request — "let users see a list of favourite foods whenever
@@ -160,13 +197,32 @@ struct FoodSearchView: View {
             try? await Task.sleep(for: .milliseconds(350)) // debounce — cancelled by .task(id:) on each keystroke
             guard !Task.isCancelled else { return }
             isSearching = true
-            results = await store.foodSearchService.search(query: query)
+            // Local-first, same merge order `ExercisePickerSheet` uses for custom exercises — a
+            // user's own foods/recipes are the most likely match for what they're searching for.
+            let local = customFoods.search(query) + recipes.searchAsFoodResults(query)
+            let networked = await store.foodSearchService.search(query: query)
+            results = local + networked
             isSearching = false
         }
         .sheet(item: $confirmingFood) { food in
-            PortionConfirmSheet(food: food, meal: meal) { originalFood, quantity, unit, referenceGrams in
+            PortionConfirmSheet(food: food, confirmButtonTitle: "Add to \(meal.rawValue)") { originalFood, quantity, unit, referenceGrams in
                 store.logFood(originalFood, quantity: quantity, unit: unit, referenceGrams: referenceGrams, to: meal)
                 dismiss()
+            }
+        }
+        .sheet(isPresented: $addingCustomFood) {
+            AddCustomFoodSheet(startingName: query) { food in
+                confirmingFood = food
+            }
+        }
+        .sheet(isPresented: $buildingRecipe) {
+            RecipeBuilderSheet { recipe in
+                confirmingFood = recipe.asFoodSearchResult
+            }
+        }
+        .sheet(isPresented: $viewingMyRecipes) {
+            MyRecipesView { recipe in
+                confirmingFood = recipe.asFoodSearchResult
             }
         }
     }
@@ -177,10 +233,15 @@ struct FoodSearchView: View {
 /// Grams/ounces only appear as options when `referenceGrams` can actually be parsed from the
 /// food's serving description — without that there's nothing to scale a gram entry against, so
 /// the sheet falls back to servings-only (still freely typed, just not a fixed step).
-private struct PortionConfirmSheet: View {
+///
+/// Not `private` — reused by `RecipeIngredientPickerSheet` (RecipeBuilderSheet.swift) for scaling
+/// a recipe ingredient's portion, the exact same quantity/unit math as logging a meal entry.
+/// Takes `confirmButtonTitle` directly rather than a `Meal` (the only thing `meal` was ever used
+/// for was that button's label) so this isn't coupled to meal-logging specifically.
+struct PortionConfirmSheet: View {
     @Environment(\.dismiss) private var dismiss
     let food: FoodSearchResult
-    let meal: Meal
+    let confirmButtonTitle: String
     var onConfirm: (FoodSearchResult, Double, PortionUnit, Double?) -> Void
 
     private let referenceGrams: Double?
@@ -189,14 +250,14 @@ private struct PortionConfirmSheet: View {
     @FocusState private var quantityFocused: Bool
     @State private var quantityBeforeFocus: String = ""
 
-    init(food: FoodSearchResult, meal: Meal, onConfirm: @escaping (FoodSearchResult, Double, PortionUnit, Double?) -> Void) {
+    init(food: FoodSearchResult, confirmButtonTitle: String, onConfirm: @escaping (FoodSearchResult, Double, PortionUnit, Double?) -> Void) {
         self.food = food
-        self.meal = meal
+        self.confirmButtonTitle = confirmButtonTitle
         self.onConfirm = onConfirm
         let grams = food.referenceGrams
         referenceGrams = grams
         _unit = State(initialValue: grams != nil ? .g : .servings)
-        _quantityText = State(initialValue: grams != nil ? Self.trimmedDecimal(grams!) : "1")
+        _quantityText = State(initialValue: grams != nil ? WeightUnit.trimmedDecimal(grams!) : "1")
     }
 
     private var availableUnits: [PortionUnit] { referenceGrams != nil ? [.g, .oz, .servings] : [.servings] }
@@ -255,11 +316,10 @@ private struct PortionConfirmSheet: View {
             Button {
                 onConfirm(food, quantity, unit, referenceGrams)
             } label: {
-                Text("Add to \(meal.rawValue)").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                Text(confirmButtonTitle).font(ForgeType.title).frame(maxWidth: .infinity)
+                    .padding(16).foregroundStyle(Color.white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(LiquidPrimaryButtonStyle())
             .disabled(multiplier <= 0)
             .opacity(multiplier <= 0 ? 0.5 : 1)
         }
@@ -272,12 +332,104 @@ private struct PortionConfirmSheet: View {
     private var scaledProtein: Double { food.proteinG * multiplier }
     private var scaledCarb: Double { food.carbG * multiplier }
     private var scaledFat: Double { food.fatG * multiplier }
+}
 
-    private static func trimmedDecimal(_ value: Double) -> String {
-        var text = String(format: "%.2f", value)
-        while text.hasSuffix("0") { text.removeLast() }
-        if text.hasSuffix(".") { text.removeLast() }
-        return text
+/// Feature request — "I want users to be able to add their own foods on their own devices, don't
+/// make it publicly shared though." Mirrors `ProgramEditorView`'s `AddCustomExerciseSheet` —
+/// same "name + a few fields, save locally" shape, just with macros instead of sets/reps.
+private struct AddCustomFoodSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var startingName: String
+    var onAdd: (FoodSearchResult) -> Void
+
+    @State private var name: String
+    @State private var brand = ""
+    @State private var servingDescription = "1 serving"
+    @State private var kcalText = ""
+    @State private var proteinText = ""
+    @State private var carbText = ""
+    @State private var fatText = ""
+
+    init(startingName: String, onAdd: @escaping (FoodSearchResult) -> Void) {
+        self.startingName = startingName
+        self.onAdd = onAdd
+        _name = State(initialValue: startingName)
+    }
+
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+    private var canSave: Bool { !trimmedName.isEmpty && Int(kcalText) != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Capsule().fill(ForgeColors.cardBorder).frame(width: 36, height: 4).frame(maxWidth: .infinity)
+            Text("Add your own food").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    LabeledField(label: "Name", placeholder: "e.g. Mom's Chili", text: $name)
+                    LabeledField(label: "Brand (optional)", placeholder: "e.g. Homemade", text: $brand)
+                    LabeledField(label: "Serving description", placeholder: "e.g. 1 cup, 100g", text: $servingDescription)
+                    HStack(spacing: 10) {
+                        LabeledField(label: "kcal", placeholder: "0", text: $kcalText, keyboard: .numberPad)
+                        LabeledField(label: "Protein (g)", placeholder: "0", text: $proteinText, keyboard: .decimalPad)
+                    }
+                    HStack(spacing: 10) {
+                        LabeledField(label: "Carbs (g)", placeholder: "0", text: $carbText, keyboard: .decimalPad)
+                        LabeledField(label: "Fat (g)", placeholder: "0", text: $fatText, keyboard: .decimalPad)
+                    }
+                }
+            }
+
+            Button {
+                let trimmedServing = servingDescription.trimmingCharacters(in: .whitespaces)
+                let food = CustomFoodStore.shared.add(
+                    name: trimmedName, brand: brand, kcal: Int(kcalText) ?? 0,
+                    proteinG: Double(proteinText) ?? 0, carbG: Double(carbText) ?? 0, fatG: Double(fatText) ?? 0,
+                    servingDescription: trimmedServing.isEmpty ? "1 serving" : trimmedServing
+                )
+                onAdd(food)
+                dismiss()
+            } label: {
+                Text("Add Food").font(ForgeType.title).frame(maxWidth: .infinity)
+                    .padding(16).foregroundStyle(Color.white)
+            }
+            .buttonStyle(LiquidPrimaryButtonStyle())
+            .disabled(!canSave)
+            .opacity(canSave ? 1 : 0.5)
+        }
+        .padding(22)
+        .presentationDetents([.height(560)])
+        .dismissKeyboardOnTap()
+    }
+}
+
+/// Shared by `AddCustomFoodSheet` and `RecipeBuilderSheet`'s ingredient entry — a labeled
+/// text field matching the `.ultraThinMaterial` field style already used throughout this file.
+struct LabeledField: View {
+    let label: String
+    let placeholder: String
+    @Binding var text: String
+    var keyboard: UIKeyboardType = .default
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+            // Feature request — "double tap the field... select all text" — plain-text fields
+            // only ("not numbers"), so the numeric-keypad ones here keep the plain `TextField`.
+            if keyboard == .default {
+                SelectAllTextField(text: $text, placeholder: placeholder)
+                    .frame(maxWidth: .infinity)
+                    .padding(10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                TextField(placeholder, text: $text)
+                    .keyboardType(keyboard)
+                    .padding(10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
     }
 }
 

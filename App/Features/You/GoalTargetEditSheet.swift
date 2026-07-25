@@ -118,10 +118,9 @@ struct GoalTargetEditSheet: View {
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(16).foregroundStyle(Color.white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(LiquidPrimaryButtonStyle())
         }
         .padding(22)
         .presentationDetents([.large])

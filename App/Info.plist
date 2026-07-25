@@ -26,6 +26,14 @@
 	<string>Used to factor your steps and sleep into your daily targets.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Trakt does not write any data to Health.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Inter-Regular.ttf</string>
+		<string>Inter-Medium.ttf</string>
+		<string>Inter-SemiBold.ttf</string>
+		<string>Inter-Bold.ttf</string>
+		<string>Inter-ExtraBold.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

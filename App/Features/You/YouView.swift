@@ -20,7 +20,7 @@ struct YouView: View {
             ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("You").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                    Text("You").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
 
                     // Feature request — "give a default avatar and assign a randomly generated
                     // username at the top. Let users edit those two fields if they want."

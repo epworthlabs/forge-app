@@ -2,6 +2,15 @@ import Foundation
 
 public enum FoodSource: String, Sendable, Equatable, Codable {
     case usda, openFoodFacts, fatSecret
+    // Feature request — "add their own foods on their own devices, don't make it publicly
+    // shared" — a per-device entry from `CustomFoodStore`.
+    case custom
+    // Feature request — "group a collection of foods and save + input it as a recipe" — the
+    // per-serving aggregate of a `Recipe` from `RecipeStore`.
+    case recipe
+    // "Add to my food database" — a developer-curated, bundled entry from `CuratedFoodLibrary`,
+    // shipped the same way the exercise library is (see that type's doc comment).
+    case curated
 }
 
 // Feature request — favorites need to persist across launches (see AppStore.favoriteFoods,

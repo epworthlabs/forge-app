@@ -100,6 +100,7 @@ actor CloudKitStore {
         // predates these fields entirely.
         if let programDayIndex = session.programDayIndex { record["programDayIndex"] = programDayIndex }
         if let programWeek = session.programWeek { record["programWeek"] = programWeek }
+        if let programID = session.programID { record["programID"] = programID }
         _ = try await database.save(record)
     }
 
@@ -115,7 +116,8 @@ actor CloudKitStore {
             return WorkoutSession(
                 date: date, sets: sets,
                 programDayIndex: record["programDayIndex"] as? Int,
-                programWeek: record["programWeek"] as? Int
+                programWeek: record["programWeek"] as? Int,
+                programID: record["programID"] as? String
             )
         }
     }
@@ -201,16 +203,69 @@ actor CloudKitStore {
         _ = try await database.save(record)
     }
 
+    // Bug fix — "the weight I log doesn't carry over to the next day... make sure that record is
+    // kept regardless of whether the app gets deleted or rolls over to a new day." This used to
+    // sort server-side via `query.sortDescriptors`, which (per this file's own doc comment above)
+    // needs the "date" field explicitly marked *Sortable* in the CloudKit Dashboard — a manual,
+    // easy-to-miss step distinct from just Queryable. If that was never set, this query throws,
+    // `AppStore.loadHistoryFromCloudKit`'s `try?` silently swallows it, and every fetch quietly
+    // failed — falling back to `init`'s single fresh seed value every single time, which reads
+    // exactly like "never carries over," reinstall or not. Sorting client-side after an
+    // unfiltered fetch needs no field-level index at all, so this can't be broken by a schema
+    // setting no code here can configure.
     func fetchBodyweightLog() async throws -> [(date: Date, weightLb: Double)] {
         let query = CKQuery(recordType: "BodyweightEntry", predicate: NSPredicate(value: true))
-        query.sortDescriptors = [NSSortDescriptor(key: "date", ascending: true)]
         let (matchResults, _) = try await database.records(matching: query)
-        return matchResults.compactMap { _, result in
+        let entries = matchResults.compactMap { _, result -> (date: Date, weightLb: Double)? in
             guard let record = try? result.get(),
                   let date = record["date"] as? Date,
                   let weightLb = record["weightLb"] as? Double
             else { return nil }
             return (date: date, weightLb: weightLb)
+        }
+        return entries.sorted { $0.date < $1.date }
+    }
+
+    // MARK: Recipes
+
+    // Bug fix — "when I redownloaded the app, my recipes weren't saved... make sure that saves
+    // even if the app gets deleted or new day rolls over." `RecipeStore` used to be device-local
+    // only (Application Support, like `CustomExerciseStore`/`CustomFoodStore`) — a reasonable
+    // tradeoff for those two (explicitly "don't make it publicly shared," and unreliable
+    // user-authored data), but a saved recipe is a deliberate, meaningful save the user expects to
+    // last, the same category workout sessions/food entries/profile already occupy. CloudKit's
+    // private database is still per-user-private (never shared with other users), it just also
+    // survives a reinstall — same fixed-ID upsert pattern `saveFoodEntry` uses, keyed by the
+    // recipe's own `id` so re-saving/editing never creates a duplicate record.
+    private static func recipeRecordID(_ id: UUID) -> CKRecord.ID {
+        CKRecord.ID(recordName: "recipe-\(id.uuidString)")
+    }
+
+    func saveRecipe(_ recipe: Recipe) async throws {
+        let recordID = Self.recipeRecordID(recipe.id)
+        let record = (try? await database.record(for: recordID)) ?? CKRecord(recordType: "Recipe", recordID: recordID)
+        record["name"] = recipe.name
+        record["servings"] = recipe.servings
+        record["ingredientsJSON"] = try JSONEncoder().encode(recipe.ingredients)
+        _ = try await database.save(record)
+    }
+
+    func deleteRecipe(id: UUID) async throws {
+        _ = try await database.deleteRecord(withID: Self.recipeRecordID(id))
+    }
+
+    func fetchRecipes() async throws -> [Recipe] {
+        let query = CKQuery(recordType: "Recipe", predicate: NSPredicate(value: true))
+        let (matchResults, _) = try await database.records(matching: query)
+        return matchResults.compactMap { _, result in
+            guard let record = try? result.get(),
+                  let name = record["name"] as? String,
+                  let servings = record["servings"] as? Int,
+                  let ingredientsData = record["ingredientsJSON"] as? Data,
+                  let ingredients = try? JSONDecoder().decode([RecipeIngredient].self, from: ingredientsData)
+            else { return nil }
+            let id = record.recordID.recordName.replacingOccurrences(of: "recipe-", with: "")
+            return Recipe(id: UUID(uuidString: id) ?? UUID(), name: name, servings: servings, ingredients: ingredients)
         }
     }
 }

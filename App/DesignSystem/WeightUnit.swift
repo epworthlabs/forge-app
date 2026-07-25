@@ -18,4 +18,15 @@ enum WeightUnit {
         let nearestFive = (lb(fromKg: kg) / 5).rounded() * 5
         return Self.kg(fromLb: nearestFive)
     }
+
+    // Feature request — "need to be able to input decimals into weights" (plate math like
+    // 62.5/135.5 lb). Trims to a clean decimal instead of always collapsing to a whole number —
+    // shared with `PortionConfirmSheet`'s identical food-quantity formatting so the two don't
+    // drift apart.
+    static func trimmedDecimal(_ value: Double) -> String {
+        var text = String(format: "%.2f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text
+    }
 }

@@ -15,7 +15,7 @@ struct ProgressTabView: View {
             ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Progress").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                    Text("Progress").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
 
                     GlassCard {
                         VStack(alignment: .leading, spacing: 8) {
@@ -173,10 +173,9 @@ private struct LogWeightSheet: View {
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(16).foregroundStyle(Color.white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(LiquidPrimaryButtonStyle())
         }
         .padding(22)
         .presentationDetents([.height(220)])

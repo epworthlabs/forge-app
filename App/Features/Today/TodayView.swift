@@ -26,7 +26,7 @@ struct TodayView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(Date(), style: .date).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                            Text("Today").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                            Text("Today").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
                         }
                         Spacer()
                         // Feature request — "make sure it reflects the image in the profile
@@ -93,10 +93,9 @@ struct TodayView: View {
                                 .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).lineLimit(1)
                             Button { selectedTab = .train } label: {
                                 Text("Start Workout").font(ForgeType.title).frame(maxWidth: .infinity)
-                                    .padding(13).foregroundStyle(Color.white).background(ForgeColors.accent)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                    .padding(13).foregroundStyle(Color.white)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(LiquidPrimaryButtonStyle(cornerRadius: 14))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }

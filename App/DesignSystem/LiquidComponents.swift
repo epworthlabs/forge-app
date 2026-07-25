@@ -34,6 +34,71 @@ struct GlassCard<Content: View>: View {
     }
 }
 
+/// Feature request — "give the headings and buttons a bit more of a liquid-glass look and feel
+/// with some colour, or some kind of styling." Every primary CTA button in the app (Finish
+/// Workout, Save, Add Food, Continue, ...) used the same flat `ForgeColors.accent` fill; this
+/// swaps that for the same glass-highlight/shadow technique `GlassCard` already uses above, tinted
+/// with an accent→accent2 gradient instead of a flat color — reads as a piece of colored glass,
+/// not a flat Material-style button. A `ButtonStyle` (not a wrapper view) so it drops into every
+/// existing call site as a one-line swap — each button's own label content, padding, and font
+/// stay exactly as they were; only the background/shape/press-feedback move here.
+struct LiquidPrimaryButtonStyle: ButtonStyle {
+    // nil means capsule-shaped (fully rounded regardless of size) — the small pill-shaped Accept
+    // button on Train's suggestion card, as opposed to the full-width rounded-rect CTAs everywhere
+    // else.
+    var cornerRadius: CGFloat? = 18
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = AnyShape(cornerRadius.map { AnyShape(RoundedRectangle(cornerRadius: $0, style: .continuous)) } ?? AnyShape(Capsule()))
+        configuration.label
+            .background(
+                LinearGradient(colors: [ForgeColors.accent, ForgeColors.accent2], startPoint: .topLeading, endPoint: .bottomTrailing)
+            )
+            .clipShape(shape)
+            .overlay(
+                shape
+                    .stroke(Color.white.opacity(0.5), lineWidth: 1)
+                    .blendMode(.plusLighter)
+                    .padding(0.5)
+            )
+            .shadow(color: ForgeColors.accent.opacity(configuration.isPressed ? 0.15 : 0.35), radius: configuration.isPressed ? 6 : 14, y: configuration.isPressed ? 3 : 8)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+/// The secondary counterpart to `LiquidPrimaryButtonStyle` — for the small "+ Add your own",
+/// "+ Create a recipe"-style action links that used to be bare colored text with no chrome at all
+/// (the plainest-reading controls in the app). A frosted glass chip instead: same
+/// `.ultraThinMaterial` + tinted-border technique as `GlassCard`/tiles, just capsule-shaped and
+/// sized for inline text rather than a full-width CTA.
+struct LiquidChipButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(ForgeColors.accent.opacity(0.12))
+            .background(.ultraThinMaterial)
+            .clipShape(Capsule())
+            .overlay(Capsule().strokeBorder(ForgeColors.accent.opacity(0.35), lineWidth: 1))
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+extension View {
+    /// Feature request — "give the headings... a bit more of a liquid-glass look and feel with
+    /// some colour." Every `displayLarge` heading in the app ("Today," "Train," "Eat," a program
+    /// name, "Workout Complete!", ...) was flat `ForgeColors.ink` — this tints it with an
+    /// ink→accent gradient instead, applied consistently everywhere that size is used rather than
+    /// picking and choosing which headings count.
+    func liquidHeadingStyle() -> some View {
+        self.foregroundStyle(
+            LinearGradient(colors: [ForgeColors.ink, ForgeColors.accent], startPoint: .top, endPoint: .bottom)
+        )
+    }
+}
+
 /// A frosted, bordered tile — the flat-value counterpart to `GlassCard`'s full card treatment.
 /// Used for compact stat readouts (Today's calorie/protein tiles, elsewhere for anything that
 /// needs the same glass texture at a smaller size than a full card).

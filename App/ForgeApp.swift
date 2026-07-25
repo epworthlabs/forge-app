@@ -86,6 +86,14 @@ struct RootView: View {
             if let (profile, program, savedPrograms, dayIndex, programStartDate) = try? await CloudKitStore.shared.fetchProfile() {
                 let loadedStore = AppStore(profile: profile, program: program, savedPrograms: savedPrograms, startingDayIndex: dayIndex, programStartDate: programStartDate)
                 await loadedStore.loadHistoryFromCloudKit()
+                // Bug fix — recovers or archives whatever was checked off in the last session that
+                // never got an explicit "Finish Workout" tap, so a cold relaunch (across a day
+                // boundary or not) never silently discards it. Must run after the CloudKit fetch
+                // above — see `resumeOrArchiveDraftIfNeeded`'s doc comment.
+                await loadedStore.resumeOrArchiveDraftIfNeeded()
+                // Bug fix — "my recipes weren't saved [after reinstall]." Backfills from CloudKit
+                // the same way workout/food/bodyweight history does above.
+                await RecipeStore.shared.loadFromCloudKit()
                 store = loadedStore
             }
             isLoadingProfile = false

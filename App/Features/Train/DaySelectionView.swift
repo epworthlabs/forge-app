@@ -23,7 +23,7 @@ struct DaySelectionView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(store.program.name).font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                        Text(store.program.name).font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
                         HStack(spacing: 10) {
                             IconButton(systemName: "chevron.left", action: { shiftWeek(by: -1) }, size: 32)
                                 .disabled(viewingWeek <= 1)

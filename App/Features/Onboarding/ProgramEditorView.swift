@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ForgeCore
 
 /// FRG-104 (create) / Feature request (edit) — one editor for both: building a brand-new custom
@@ -54,8 +55,8 @@ struct ProgramEditorView: View {
                 ForgeColors.backgroundWash
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        TextField("Program name", text: $programName)
-                            .font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+                        SelectAllTextField(text: $programName, placeholder: "Program name", font: ForgeType.titleUIFont)
+                            .frame(maxWidth: .infinity)
                             .padding(12)
                             .background(.ultraThinMaterial)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -160,10 +161,9 @@ struct ProgramEditorView: View {
                             dismiss()
                         } label: {
                             Text("Save Program").font(ForgeType.title).frame(maxWidth: .infinity)
-                                .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .padding(16).foregroundStyle(Color.white)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(LiquidPrimaryButtonStyle())
                         .disabled(!canSave)
                         .opacity(canSave ? 1 : 0.5)
                     }
@@ -215,8 +215,8 @@ struct DayEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                TextField("Day name", text: $day.name)
-                    .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                SelectAllTextField(text: $day.name, placeholder: "Day name")
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer()
                 if let onDeleteDay {
                     IconButton(systemName: "trash", action: onDeleteDay, size: 40)
@@ -226,6 +226,18 @@ struct DayEditor: View {
             ForEach($day.exercises) { $exercise in
                 ExerciseRowEditor(exercise: $exercise) {
                     day.exercises.removeAll { $0.id == exercise.id }
+                } onDrop: { draggedID in
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                        moveExercise(id: draggedID, near: exercise.id)
+                    }
+                } onMoveToTop: {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                        moveExerciseToTop(id: exercise.id)
+                    }
+                } onMoveToBottom: {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                        moveExerciseToBottom(id: exercise.id)
+                    }
                 }
             }
 
@@ -240,17 +252,78 @@ struct DayEditor: View {
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
+
+    // Feature request — "rearrange exercises under workouts," durable-program-editor side (see
+    // `AppStore.moveExercise` for the session-screen equivalent). Local to this editor's own
+    // `@Binding` array — no store method needed, it's just saved through the existing `onSave`.
+    //
+    // Bug fix — "when we move it, I want it more responsive... it should immediately go above it
+    // if it's currently below, or below it if it's currently above." Same directional fix as
+    // `AppStore.moveExercise(id:near:)` — see that doc comment for the full reasoning.
+    private func moveExercise(id: String, near targetID: String) {
+        guard id != targetID,
+              let fromIndex = day.exercises.firstIndex(where: { $0.id == id }),
+              let targetIndexBeforeMove = day.exercises.firstIndex(where: { $0.id == targetID }) else { return }
+        let draggingDown = fromIndex < targetIndexBeforeMove
+        let exercise = day.exercises.remove(at: fromIndex)
+        guard let targetIndex = day.exercises.firstIndex(where: { $0.id == targetID }) else {
+            day.exercises.insert(exercise, at: min(fromIndex, day.exercises.count))
+            return
+        }
+        day.exercises.insert(exercise, at: draggingDown ? targetIndex + 1 : targetIndex)
+    }
+
+    private func moveExerciseToTop(id: String) {
+        guard let index = day.exercises.firstIndex(where: { $0.id == id }), index != 0 else { return }
+        let exercise = day.exercises.remove(at: index)
+        day.exercises.insert(exercise, at: 0)
+    }
+
+    private func moveExerciseToBottom(id: String) {
+        guard let index = day.exercises.firstIndex(where: { $0.id == id }), index != day.exercises.count - 1 else { return }
+        let exercise = day.exercises.remove(at: index)
+        day.exercises.append(exercise)
+    }
 }
 
 private struct ExerciseRowEditor: View {
     @Binding var exercise: ProgramExercise
     var onDelete: () -> Void
+    var onDrop: (String) -> Void
+    var onMoveToTop: () -> Void
+    var onMoveToBottom: () -> Void
+    // Bug fix — "the reordering function is janky... when you drag it should have a ghost of the
+    // card." Same treatment as `TrainView.ExerciseCard`'s equivalent.
+    @State private var isDropTarget = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
+                // Bug fix — "give haptic feedback to denote it's ready to be moved." A previous
+                // attempt used a `simultaneousGesture(DragGesture(minimumDistance: 0))` here to
+                // catch touch-down, which competed with `.draggable`'s own touch recognition and
+                // broke dragging entirely. `preview` is only evaluated once a drag session
+                // actually starts, so firing the haptic from its `onAppear` needs nothing that can
+                // conflict with the drag itself — same fix as `TrainView.ExerciseCard`.
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(ForgeColors.inkMuted).font(.system(size: 13))
+                    .frame(width: 24, height: 36)
+                    .contentShape(Rectangle())
+                    .draggable(exercise.id) {
+                        ExerciseDragPreview(name: exercise.exerciseName)
+                            .onAppear { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+                    }
                 Text(exercise.exerciseName).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
                 Spacer()
+                // Feature request — "add a move to bottom button in the ... menu item and move to
+                // top button as well."
+                Menu {
+                    Button(action: onMoveToTop) { Label("Move to Top", systemImage: "arrow.up.to.line") }
+                    Button(action: onMoveToBottom) { Label("Move to Bottom", systemImage: "arrow.down.to.line") }
+                } label: {
+                    Image(systemName: "ellipsis.circle").foregroundStyle(ForgeColors.inkMuted).font(.system(size: 16))
+                        .frame(width: 30, height: 36)
+                }
                 IconButton(systemName: "xmark", action: onDelete, size: 36)
             }
             // Feature request — "allow users to edit the numbers numpad" — typed entry instead of
@@ -277,6 +350,15 @@ private struct ExerciseRowEditor: View {
         .padding(10)
         .background(ForgeColors.tileBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .scaleEffect(isDropTarget ? 1.02 : 1)
+        .animation(.easeOut(duration: 0.15), value: isDropTarget)
+        .dropDestination(for: String.self) { items, _ in
+            guard let draggedID = items.first else { return false }
+            onDrop(draggedID)
+            return true
+        } isTargeted: { targeted in
+            isDropTarget = targeted
+        }
     }
 }
 
@@ -347,7 +429,8 @@ struct ExercisePickerSheet: View {
                 ForgeColors.backgroundWash
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        TextField("Search exercises…", text: $query)
+                        SelectAllTextField(text: $query, placeholder: "Search exercises…")
+                            .frame(maxWidth: .infinity)
                             .padding(10)
                             .background(.ultraThinMaterial)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -419,12 +502,14 @@ private struct AddCustomExerciseSheet: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Name").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                TextField("e.g. Hack Squat Machine", text: $name)
+                SelectAllTextField(text: $name, placeholder: "e.g. Hack Squat Machine")
+                    .frame(maxWidth: .infinity)
                     .padding(10).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Equipment (optional)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                TextField("e.g. Machine", text: $equipment)
+                SelectAllTextField(text: $equipment, placeholder: "e.g. Machine")
+                    .frame(maxWidth: .infinity)
                     .padding(10).background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
 
@@ -433,10 +518,9 @@ private struct AddCustomExerciseSheet: View {
                 onAdd(exercise)
             } label: {
                 Text("Add Exercise").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(16).foregroundStyle(Color.white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(LiquidPrimaryButtonStyle())
             .disabled(trimmedName.isEmpty)
             .opacity(trimmedName.isEmpty ? 0.5 : 1)
         }

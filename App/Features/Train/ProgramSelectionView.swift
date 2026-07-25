@@ -17,7 +17,7 @@ struct ProgramSelectionView: View {
             ForgeColors.backgroundWash
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Train").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                    Text("Train").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
                     Text("Choose a program").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
 
                     LazyVGrid(columns: columns, spacing: 12) {

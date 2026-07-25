@@ -35,12 +35,20 @@ public struct WorkoutSession: Sendable, Codable, Identifiable {
     /// same graceful-fallback pattern as every other additive field in this app.
     public var programDayIndex: Int?
     public var programWeek: Int?
+    /// Bug fix — "when I mark off the first workout in a program, it marks off the first workout
+    /// in other programs too." Completion lookup used to match on `programWeek`/`programDayIndex`
+    /// alone — with no record of *which program* a session belonged to, Week 1/Day 0 of Program A
+    /// was indistinguishable from Week 1/Day 0 of Program B. Optional/additive like the two above —
+    /// nil on sessions logged before this existed, treated as "matches the currently active
+    /// program" by the reader rather than excluded outright, so old completion history isn't lost.
+    public var programID: String?
 
-    public init(date: Date, sets: [SetLog], programDayIndex: Int? = nil, programWeek: Int? = nil) {
+    public init(date: Date, sets: [SetLog], programDayIndex: Int? = nil, programWeek: Int? = nil, programID: String? = nil) {
         self.date = date
         self.sets = sets
         self.programDayIndex = programDayIndex
         self.programWeek = programWeek
+        self.programID = programID
     }
 
     /// Σ(sets × reps × weight × RPE/10) — PRD Appendix step 2.

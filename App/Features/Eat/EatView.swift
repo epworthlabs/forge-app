@@ -34,7 +34,7 @@ struct EatView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("Eat").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                        Text("Eat").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
                         Spacer()
                     }
 
@@ -246,8 +246,8 @@ private struct FoodEntryEditSheet: View {
 
             Text("Edit Food").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
 
-            TextField("Name", text: $name)
-                .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+            SelectAllTextField(text: $name, placeholder: "Name")
+                .frame(maxWidth: .infinity)
                 .padding(12)
                 .background(ForgeColors.tileBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -293,10 +293,9 @@ private struct FoodEntryEditSheet: View {
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(16).foregroundStyle(Color.white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(LiquidPrimaryButtonStyle())
             .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0)
             .opacity(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0 ? 0.5 : 1)
         }

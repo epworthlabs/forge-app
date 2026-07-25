@@ -25,7 +25,7 @@ struct WorkoutCompleteView: View {
                     .font(.system(size: 72))
                     .foregroundStyle(ForgeColors.accent)
                 VStack(spacing: 8) {
-                    Text("Workout Complete!").font(ForgeType.displayLarge).foregroundStyle(ForgeColors.ink)
+                    Text("Workout Complete!").font(ForgeType.displayLarge).tracking(-0.6).liquidHeadingStyle()
                     Text("Nice work — that's one more session in the bank.")
                         .font(ForgeType.body).foregroundStyle(ForgeColors.inkMuted)
                         .multilineTextAlignment(.center)
@@ -43,10 +43,9 @@ struct WorkoutCompleteView: View {
 
                 Button(action: onContinue) {
                     Text("Continue").font(ForgeType.title).frame(maxWidth: .infinity)
-                        .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .padding(16).foregroundStyle(Color.white)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LiquidPrimaryButtonStyle())
                 .padding(.horizontal, 24)
                 .padding(.bottom, 40)
             }

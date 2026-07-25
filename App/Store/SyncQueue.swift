@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import UIKit
 import ForgeCore
 
 /// FRG-114 — every CloudKit write used to be `Task { try? await CloudKitStore.shared.saveX(...) }`:
@@ -16,12 +17,16 @@ enum PendingWrite {
     // above now upserts by the entry's own stable id (see CloudKitStore.saveFoodEntry), so it
     // already covers edits; this covers the delete half.
     case deleteFoodEntry(id: UUID)
+    // Bug fix — "my recipes weren't saved [after reinstall]... make sure that saves even if the
+    // app gets deleted." Same upsert-by-id / delete-by-id pattern as foodEntry above.
+    case recipe(Recipe)
+    case deleteRecipe(id: UUID)
 }
 
 // Manual Codable — Swift doesn't synthesize Codable for enums with associated values.
 extension PendingWrite: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, profile, program, savedPrograms, dayIndex, programStartDate, session, entry, meal, date, weightLb, id
+        case type, profile, program, savedPrograms, dayIndex, programStartDate, session, entry, meal, date, weightLb, id, recipe
     }
 
     func encode(to encoder: Encoder) throws {
@@ -48,6 +53,12 @@ extension PendingWrite: Codable {
         case .deleteFoodEntry(let id):
             try container.encode("deleteFoodEntry", forKey: .type)
             try container.encode(id, forKey: .id)
+        case .recipe(let recipe):
+            try container.encode("recipe", forKey: .type)
+            try container.encode(recipe, forKey: .recipe)
+        case .deleteRecipe(let id):
+            try container.encode("deleteRecipe", forKey: .type)
+            try container.encode(id, forKey: .id)
         }
     }
 
@@ -70,6 +81,10 @@ extension PendingWrite: Codable {
             self = .bodyweightEntry(date: try container.decode(Date.self, forKey: .date), weightLb: try container.decode(Double.self, forKey: .weightLb))
         case "deleteFoodEntry":
             self = .deleteFoodEntry(id: try container.decode(UUID.self, forKey: .id))
+        case "recipe":
+            self = .recipe(try container.decode(Recipe.self, forKey: .recipe))
+        case "deleteRecipe":
+            self = .deleteRecipe(id: try container.decode(UUID.self, forKey: .id))
         case let unknown:
             throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Unknown PendingWrite type: \(unknown)")
         }
@@ -108,19 +123,37 @@ actor SyncQueue {
 
     /// Tries immediately; only falls back to the persisted retry queue on failure, so the common
     /// case (online) isn't slowed down by queue bookkeeping.
+    ///
+    /// Bug fix — "when a new day rolls over, the workouts I completed / the weight I log are no
+    /// longer recorded, this also happens when I uninstall the app." Every call site fires this
+    /// from a bare `Task { await SyncQueue.shared.enqueue(...) }` — e.g. right after tapping
+    /// "Finish Workout" or saving a weigh-in, exactly the moment a real user is likely to lock
+    /// their phone or switch apps. If iOS suspends the process before that `Task` gets to run, the
+    /// write is killed mid-flight: it never reaches either the success path or the `catch` that
+    /// would queue it for retry, so it's lost with no trace — not a network failure `pending` can
+    /// recover from, since it never got far enough to be recorded as failed. `beginBackgroundTask`
+    /// asks iOS for extra time to finish in-flight work even after the app backgrounds, which is
+    /// exactly what's needed here; without it, only writes that complete before backgrounding (or
+    /// that already-thrown network errors get queued) survive, which reads exactly like "gone the
+    /// moment I stop looking at the app."
     func enqueue(_ write: PendingWrite) async {
+        let taskID = await Self.beginBackgroundTask()
         do {
             try await perform(write)
         } catch {
             pending.append(write)
             persist()
         }
+        await Self.endBackgroundTask(taskID)
     }
 
     /// Call on network restore and app foreground — covers both "was briefly offline mid-session"
-    /// and "was force-quit offline, network came back while it wasn't running."
+    /// and "was force-quit offline, network came back while it wasn't running." Same background-task
+    /// protection as `enqueue` — a retry triggered right as the app resumes shouldn't be killable by
+    /// the user backgrounding again a moment later, before the retry itself finishes.
     func flush() async {
         guard !pending.isEmpty else { return }
+        let taskID = await Self.beginBackgroundTask()
         var remaining: [PendingWrite] = []
         for write in pending {
             do {
@@ -131,6 +164,7 @@ actor SyncQueue {
         }
         pending = remaining
         persist()
+        await Self.endBackgroundTask(taskID)
     }
 
     var pendingCount: Int { pending.count }
@@ -147,6 +181,10 @@ actor SyncQueue {
             try await CloudKitStore.shared.saveBodyweightEntry(date: date, weightLb: weightLb)
         case .deleteFoodEntry(let id):
             try await CloudKitStore.shared.deleteFoodEntry(id: id)
+        case .recipe(let recipe):
+            try await CloudKitStore.shared.saveRecipe(recipe)
+        case .deleteRecipe(let id):
+            try await CloudKitStore.shared.deleteRecipe(id: id)
         }
     }
 
@@ -158,5 +196,23 @@ actor SyncQueue {
     private static func load(from url: URL) -> [PendingWrite] {
         guard let data = try? Data(contentsOf: url), let decoded = try? JSONDecoder().decode([PendingWrite].self, from: data) else { return [] }
         return decoded
+    }
+
+    // `UIApplication` is main-actor-isolated; `SyncQueue` itself isn't, so these hop over rather
+    // than requiring every caller to. The expiration handler ends the same identifier it was given
+    // — standard `beginBackgroundTask` idiom for "the OS ran out of patience before we finished."
+    @MainActor
+    private static func beginBackgroundTask() -> UIBackgroundTaskIdentifier {
+        var taskID: UIBackgroundTaskIdentifier = .invalid
+        taskID = UIApplication.shared.beginBackgroundTask(withName: "SyncQueue.write") {
+            UIApplication.shared.endBackgroundTask(taskID)
+        }
+        return taskID
+    }
+
+    @MainActor
+    private static func endBackgroundTask(_ taskID: UIBackgroundTaskIdentifier) {
+        guard taskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(taskID)
     }
 }

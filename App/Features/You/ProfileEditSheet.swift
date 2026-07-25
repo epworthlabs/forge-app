@@ -47,10 +47,9 @@ struct ProfileEditSheet: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Username").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                TextField("Username", text: $username)
-                    .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                SelectAllTextField(text: $username, placeholder: "Username")
                     .padding(14)
-                    .frame(minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
@@ -69,10 +68,9 @@ struct ProfileEditSheet: View {
                 dismiss()
             } label: {
                 Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white).background(ForgeColors.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .padding(16).foregroundStyle(Color.white)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(LiquidPrimaryButtonStyle())
         }
         .padding(22)
         .presentationDetents([.height(460)])

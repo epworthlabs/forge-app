@@ -26,6 +26,10 @@ enum Secrets {
     static let postHogAPIKey: String? = nil
     static let postHogHost = "https://us.i.posthog.com"
 
+    /// Fill in with the real https://apps.apple.com/app/idXXXXXXXXXX link once the app is live on
+    /// the App Store — see ReferralManager.shareMessage. nil omits it from the share message.
+    static let appStoreURL: String? = nil
+
     static var foodDatabaseCredentials: FoodDatabaseCredentials {
         FoodDatabaseCredentials(usdaAPIKey: usdaAPIKey, fatSecretProxyBaseURL: fatSecretProxyBaseURL, fatSecretProxySharedSecret: fatSecretProxySharedSecret)
     }
