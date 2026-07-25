@@ -159,6 +159,13 @@ private extension [FoodSearchResult] {
         #expect(requestedURL.contains("Foundation"))
         #expect(requestedURL.contains("SR%20Legacy") || requestedURL.contains("SR Legacy"))
         #expect(!requestedURL.contains("Branded"))
+        // Regression — requesting `Survey (FNDDS)` made USDA's edge layer intermittently reject
+        // the whole request with a bare nginx 400 (measured 1/8 success alone, 4/8 combined), which
+        // the service's per-source `try?` swallowed as an empty result. A mocked session can't
+        // reproduce a real 400, so this asserts the actual trigger instead: no parentheses in any
+        // outgoing USDA query parameter.
+        #expect(!requestedURL.contains("FNDDS"))
+        #expect(!requestedURL.contains("(") && !requestedURL.contains("%28"))
     }
 
     @Test func openFoodFactsDecodesMixedTypeNutrimentsDictionaryWithoutCrashing() async throws {
@@ -218,6 +225,29 @@ private extension [FoodSearchResult] {
         #expect(results.count == 2) // 1 valid USDA result + 1 valid Open Food Facts result
         #expect(results.contains { $0.source == .usda })
         #expect(results.contains { $0.source == .openFoodFacts })
+    }
+
+    // "Let's try to move away from the USDA database" — demoted, not removed: it still answers
+    // when nothing better does (a cold FatSecret proxy), but never leads when a preferred source
+    // returned a comparable match. Both fixtures here are unbranded and merely *contain* the
+    // query, so source priority is the only thing separating them.
+    @Test func usdaRanksBelowPreferredSourcesForComparableMatches() async {
+        MockURLProtocol.stub(urlContains: "api.nal.usda.gov", data: usdaFixture)
+        MockURLProtocol.stub(urlContains: "fatsecret.test", data: fatSecretFixture)
+        let credentials = FoodDatabaseCredentials(
+            usdaAPIKey: "DEMO_KEY",
+            fatSecretProxyBaseURL: "https://fatsecret.test",
+            fatSecretProxySharedSecret: "secret"
+        )
+        let service = FoodSearchService(credentials: credentials, session: MockURLProtocol.makeSession())
+
+        let results = await service.search(query: "chicken").fromNetworkSources
+        let usdaIndex = results.firstIndex { $0.source == .usda }
+        let fatSecretIndex = results.firstIndex { $0.source == .fatSecret }
+
+        #expect(usdaIndex != nil) // still present — a gap-filler, not removed
+        #expect(fatSecretIndex != nil)
+        if let usdaIndex, let fatSecretIndex { #expect(fatSecretIndex < usdaIndex) }
     }
 
     @Test func serviceEmptyQueryReturnsNoResultsWithoutNetworkCalls() async {

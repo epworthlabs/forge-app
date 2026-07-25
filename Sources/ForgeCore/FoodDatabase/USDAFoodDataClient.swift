@@ -47,20 +47,26 @@ public struct USDAFoodDataClient: Sendable {
     // "Chicken, breast, boneless, skinless, raw" entry didn't even make the first page, crowded out
     // by supermarket house-brand products. `FoodSearchService`'s ranking already scores unbranded
     // results higher, but it can only re-rank what actually comes back — with Branded dominating
-    // USDA's own top-N, there was rarely a generic candidate to promote. Scoping to just
-    // Foundation/SR Legacy/Survey (FNDDS) — USDA's actual generic/reference-food datasets — drops
-    // Branded from USDA's results entirely; Open Food Facts and FatSecret already cover branded
-    // products on their own, so nothing is lost, and USDA now does exactly what the source-priority
-    // comment in `FoodSearchService.search` already claimed it did ("USDA next for generic/whole
-    // foods"). Confirmed live: the same query scoped this way returns 15/15 unbranded matches,
-    // including the plain "Chicken, breast, boneless, skinless, raw" entry.
+    // USDA's own top-N, there was rarely a generic candidate to promote. Scoping to USDA's
+    // generic/reference-food datasets drops Branded from its results entirely; Open Food Facts and
+    // FatSecret already cover branded products on their own.
+    //
+    // Bug fix — this originally also requested `Survey (FNDDS)`, which broke roughly half of all
+    // USDA searches: that value's *parentheses* make USDA's edge layer intermittently reject the
+    // whole request with a bare nginx `400 Bad Request` (no JSON error body), which
+    // `FoodSearchService`'s per-source `try?` then swallowed as "this source returned nothing."
+    // Measured over repeated identical queries: `Foundation,SR Legacy` → 8/8 succeeded;
+    // `SR Legacy,Survey (FNDDS)` → 4/8; `Survey (FNDDS)` alone → 1/8. Dropping it costs little —
+    // Survey (FNDDS) holds prepared-dish descriptions ("Chicken breast, rotisserie, skin not
+    // eaten") rather than the plain reference foods this source exists to provide, and those come
+    // through Foundation/SR Legacy regardless.
     public func search(query: String, pageSize: Int = 15) async throws -> [FoodSearchResult] {
         var components = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/foods/search")!
         components.queryItems = [
             URLQueryItem(name: "query", value: query),
             URLQueryItem(name: "pageSize", value: String(pageSize)),
             URLQueryItem(name: "api_key", value: apiKey),
-            URLQueryItem(name: "dataType", value: "Foundation,SR Legacy,Survey (FNDDS)"),
+            URLQueryItem(name: "dataType", value: "Foundation,SR Legacy"),
         ]
         var request = URLRequest(url: components.url!)
         request.setValue("application/json", forHTTPHeaderField: "Accept")

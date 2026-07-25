@@ -58,11 +58,18 @@ public actor FoodSearchService {
         // point of curating it in the first place.
         let curated = CuratedFoodLibrary.search(normalizedQuery)
 
-        // Open Food Facts first (of the live sources): best barcode/packaged-food coverage, most
-        // likely to match what a user actually scans or searches for day to day. USDA next for
-        // generic/whole foods. FatSecret last as the paid-tier fallback for search gaps (PRD
-        // food-database decision).
-        var combined = curated + off + usda + fs
+        // Merge/dedup priority (first copy of a given name+brand wins): curated, then FatSecret,
+        // then Open Food Facts, then USDA last.
+        //
+        // "Let's try to move away from the USDA database" — USDA is demoted to a gap-filler rather
+        // than removed, because it's the only *always-available* generic-food source: FatSecret
+        // rides a free-tier proxy that sleeps after ~15min idle and takes 30-60s to wake against a
+        // 4s timeout, so the first search after a quiet spell gets nothing from it. USDA covers
+        // exactly that window. Where both do answer, FatSecret's naming is markedly better for a
+        // consumer app — live comparison on "white rice": FatSecret returns plain "White Rice",
+        // USDA returns "Beans and white rice" / "Rice, white, cooked, glutinous" — hence FatSecret
+        // winning the dedup, and the explicit source penalty in `rankScore`.
+        var combined = curated + fs + off + usda
         var seen = Set<String>()
         combined = combined.filter { seen.insert("\($0.name.lowercased())|\($0.brand?.lowercased() ?? "")").inserted }
 
@@ -102,6 +109,13 @@ public actor FoodSearchService {
         } else if name.contains(query) {
             score += 5
         }
+
+        // "Move away from the USDA database" — a penalty rather than removal, so USDA only ever
+        // surfaces where nothing better answered (notably a cold FatSecret proxy). Sized at 10 so
+        // it reorders sources within the same tier without overriding the two signals that matter
+        // more: an exact name match (50) and the brand/generic distinction (100/200). A USDA
+        // exact match still beats a merely-contains match from a preferred source.
+        if result.source == .usda { score -= 10 }
 
         return score
     }
