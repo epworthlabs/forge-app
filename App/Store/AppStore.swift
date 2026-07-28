@@ -348,14 +348,32 @@ final class AppStore: ObservableObject {
         })
     }
 
-    /// Feature request — "suggest the next workout depending on the week and what has already
-    /// been done during that week." First day this week not yet completed; if every day's done
-    /// (or the week has no days at all), falls back to day 0 rather than pointing nowhere.
-    func suggestedDayIndex(forWeek week: Int) -> Int {
-        let days = program.days(forWeek: week)
-        guard !days.isEmpty else { return 0 }
-        let done = completedDayIndices(forWeek: week)
-        return (0..<days.count).first { !done.contains($0) } ?? 0
+    /// Bug fix — "the suggested exercise to go to the next week if all the exercises in the week
+    /// tab is completed. It should never suggest a completed workout." + "when the user taps into
+    /// a workout program, it should display the week that the suggested workout is at, not week
+    /// 1." `currentProgramWeek` is purely calendar-based (elapsed days ÷ 7) — someone training
+    /// more often than the program's own cadence can fully finish "this week" well before the
+    /// calendar week is over. The old day-only version of this only ever looked *within* the given
+    /// week and fell back to day 0 — already completed — once everything in it was done. This
+    /// instead walks forward from `currentProgramWeek` until it finds a week with something left
+    /// to do, so both the suggestion itself and whichever week `DaySelectionView` opens to reflect
+    /// actual progress, not just the calendar.
+    func suggestedSession() -> (week: Int, dayIndex: Int) {
+        var week = currentProgramWeek
+        while week <= program.weekCount {
+            let days = program.days(forWeek: week)
+            if !days.isEmpty {
+                let done = completedDayIndices(forWeek: week)
+                if let dayIndex = (0..<days.count).first(where: { !done.contains($0) }) {
+                    return (week, dayIndex)
+                }
+            }
+            week += 1
+        }
+        // Every remaining week through the program's own timeframe is already fully completed —
+        // nothing meaningful left to suggest; land on day 0 of the last week rather than pointing
+        // past the program's timeframe entirely.
+        return (max(1, program.weekCount), 0)
     }
 
     // Feature request — "there needs to be a way to delete... workouts within the week... hold
@@ -576,12 +594,14 @@ final class AppStore: ObservableObject {
         lastCompletedSession = session
 
         // Feature request — "suggest the next workout depending on the week and what has already
-        // been done during that week" — the next not-yet-done day this week, rather than blindly
-        // rotating to "whatever's next in sequence" regardless of what's actually been completed.
-        // Also returns to the real current week (rather than staying on whatever week was just
-        // caught up on) so the next time Train opens, it's back to "this week" by default.
-        activeWeek = currentProgramWeek
-        currentProgramDayIndex = suggestedDayIndex(forWeek: activeWeek)
+        // been done" — the next not-yet-done day, rather than blindly rotating to "whatever's
+        // next in sequence" regardless of what's actually been completed. Bug fix — this used to
+        // always land back on `currentProgramWeek` (the real calendar week) even if every day in
+        // it was now done, re-suggesting a completed workout; `suggestedSession()` walks forward
+        // to the next week with something left instead.
+        let next = suggestedSession()
+        activeWeek = next.week
+        currentProgramDayIndex = next.dayIndex
         todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: currentProgramDayIndex)
         refreshLastPerformance()
 

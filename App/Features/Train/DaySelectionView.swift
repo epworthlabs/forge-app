@@ -11,11 +11,19 @@ struct DaySelectionView: View {
     var onReview: () -> Void
 
     // Feature request — "allow users to traverse through multiple weeks, ex. week 1 of 12, week 4
-    // of 12." nil means "just show the real current week" — avoids needing `store` (an
-    // @EnvironmentObject, not available yet inside init) to seed this at construction time; only
-    // set once the user actually pages away from the current week.
+    // of 12." nil means "just show wherever the suggested session actually is" — avoids needing
+    // `store` (an @EnvironmentObject, not available yet inside init) to seed this at construction
+    // time; only set once the user actually pages away from that.
+    //
+    // Bug fix — "when the user taps into a workout program, it should display the week that the
+    // suggested workout is at, not week 1." This used to default to `store.currentProgramWeek` —
+    // the real calendar week — which reads as "week 1" whenever someone's training faster than
+    // the program's own cadence (e.g. done every day, so this calendar week's content is already
+    // finished by day 3 or 4): the suggestion has already moved on to a later week, but this
+    // screen still opened on the calendar's week. `suggestedSession()` is where the suggestion
+    // actually lives, which is what should open by default.
     @State private var manuallySelectedWeek: Int?
-    private var viewingWeek: Int { manuallySelectedWeek ?? store.currentProgramWeek }
+    private var viewingWeek: Int { manuallySelectedWeek ?? store.suggestedSession().week }
 
     var body: some View {
         ZStack {
@@ -60,15 +68,17 @@ struct DaySelectionView: View {
                     } else {
                         // Feature request — "denote that specific workout was completed for the
                         // week... suggest the next workout depending on the week and what has
-                        // already been done." Suggestion only makes sense for the real current
-                        // week — browsing a different week is for reference, not "what's next."
+                        // already been done." Bug fix — "it should never suggest a completed
+                        // workout" — `suggestedSession()` (not a per-week lookup) is what actually
+                        // finds the next uncompleted day, which may be a different week than the
+                        // one being browsed here.
                         let completed = store.completedDayIndices(forWeek: viewingWeek)
-                        let suggested = store.suggestedDayIndex(forWeek: viewingWeek)
+                        let suggestion = store.suggestedSession()
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                             ForEach(Array(days.enumerated()), id: \.offset) { index, day in
                                 DayTile(
                                     day: day,
-                                    isSuggested: viewingWeek == store.currentProgramWeek && index == suggested,
+                                    isSuggested: viewingWeek == suggestion.week && index == suggestion.dayIndex,
                                     isCompleted: completed.contains(index)
                                 ) {
                                     onSelectDay(index, viewingWeek)
@@ -93,6 +103,18 @@ struct DaySelectionView: View {
         }
         .navigationTitle("This Week")
         .navigationBarTitleDisplayMode(.inline)
+        // Feature request — "I want users to be able to swipe left and right when they toggle
+        // through the weeks." The chevrons above still work; this adds the swipe as another way
+        // to trigger the same `shiftWeek`. A largish `minimumDistance` plus checking the drag is
+        // more horizontal than vertical keeps this from fighting the ScrollView's own vertical
+        // scroll gesture for the day tiles.
+        .gesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                    shiftWeek(by: value.translation.width < 0 ? 1 : -1)
+                }
+        )
     }
 
     private func shiftWeek(by delta: Int) {
