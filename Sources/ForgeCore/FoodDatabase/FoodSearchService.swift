@@ -70,6 +70,14 @@ public actor FoodSearchService {
         // USDA returns "Beans and white rice" / "Rice, white, cooked, glutinous" — hence FatSecret
         // winning the dedup, and the explicit source penalty in `rankScore`.
         var combined = curated + fs + off + usda
+        // Bug fix — "kiwi had 0 calories... get rid of any inaccurate foods that list 0 calories
+        // when it should have some calories in them." Root cause: USDA/Open Food Facts both
+        // include a record as long as it has *some* macro data (protein or energy present), but
+        // then default a genuinely *missing* energy value to 0 via `?? 0` — so a real record that
+        // lists protein/fat/carb but no energy value silently becomes a phantom "0 kcal" food
+        // instead of being excluded. Filtering here (once, after merging all sources) catches it
+        // regardless of which source it came from, rather than patching each client separately.
+        combined = combined.filter { $0.kcal > 0 }
         var seen = Set<String>()
         combined = combined.filter { seen.insert("\($0.name.lowercased())|\($0.brand?.lowercased() ?? "")").inserted }
 
