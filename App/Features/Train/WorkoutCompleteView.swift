@@ -15,6 +15,15 @@ struct WorkoutCompleteView: View {
     private var totalVolumeLb: Int {
         Int((session?.sets ?? []).reduce(0.0) { $0 + WeightUnit.lb(fromKg: $1.weightKg) * Double($1.reps) }.rounded())
     }
+    // Feature request — "the whole workout should be timed so upon completion, users know how
+    // long their workout session was." nil (shown as "—") only for a session logged before this
+    // field existed, or the rare case where a start was never recorded.
+    private var durationText: String {
+        guard let seconds = session?.durationSeconds else { return "—" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes) min" }
+        return "\(minutes / 60)h \(minutes % 60)m"
+    }
 
     var body: some View {
         ZStack {
@@ -32,10 +41,17 @@ struct WorkoutCompleteView: View {
                         .padding(.horizontal, 32)
                 }
 
-                HStack(spacing: 12) {
-                    StatTile(label: "Exercises", value: "\(exerciseCount)")
-                    StatTile(label: "Sets", value: "\(setCount)")
-                    StatTile(label: "Volume", value: "\(totalVolumeLb) lb")
+                // 2x2 grid, not a single 4-wide row — "Volume" and "Duration" can both run to
+                // 5-6 characters, and a quarter-width tile at this font size would feel squished.
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        StatTile(label: "Exercises", value: "\(exerciseCount)")
+                        StatTile(label: "Sets", value: "\(setCount)")
+                    }
+                    HStack(spacing: 12) {
+                        StatTile(label: "Volume", value: "\(totalVolumeLb) lb")
+                        StatTile(label: "Duration", value: durationText)
+                    }
                 }
                 .padding(.horizontal, 24)
 

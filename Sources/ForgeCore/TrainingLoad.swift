@@ -42,13 +42,19 @@ public struct WorkoutSession: Sendable, Codable, Identifiable {
     /// nil on sessions logged before this existed, treated as "matches the currently active
     /// program" by the reader rather than excluded outright, so old completion history isn't lost.
     public var programID: String?
+    /// Feature request — "the whole workout should be timed so upon completion, users know how
+    /// long their workout session was." Wall-clock elapsed time from the first set checked off to
+    /// Finish Workout (see `AppStore.workoutStartedAt`) — optional/additive like the three fields
+    /// above, so sessions logged before this existed just don't show a duration.
+    public var durationSeconds: Int?
 
-    public init(date: Date, sets: [SetLog], programDayIndex: Int? = nil, programWeek: Int? = nil, programID: String? = nil) {
+    public init(date: Date, sets: [SetLog], programDayIndex: Int? = nil, programWeek: Int? = nil, programID: String? = nil, durationSeconds: Int? = nil) {
         self.date = date
         self.sets = sets
         self.programDayIndex = programDayIndex
         self.programWeek = programWeek
         self.programID = programID
+        self.durationSeconds = durationSeconds
     }
 
     /// Σ(sets × reps × weight × RPE/10) — PRD Appendix step 2.

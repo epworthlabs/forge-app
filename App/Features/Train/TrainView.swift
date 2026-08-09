@@ -421,7 +421,14 @@ private struct SetRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+            // V2 bug fix — "the weights look funny, lb is squished." The done-circle, weight
+            // field, reps field, and trash button together used to overflow the card's available
+            // width on smaller phones (iPhone SE/mini) once the number fields were widened for
+            // legibility — the "lb" label was the only view here with no fixed frame, so it
+            // silently absorbed the overflow. Tightened spacing throughout this row (and in
+            // WeightNumberField/RepsNumberField below) reclaims enough width that nothing has to
+            // compress anymore.
+            HStack(spacing: 4) {
                 Button {
                     store.toggleSet(exerciseID: exerciseID, setID: set.id)
                 } label: {
@@ -429,11 +436,10 @@ private struct SetRow: View {
                         .strokeBorder(set.done ? ForgeColors.accent : ForgeColors.inkMuted, lineWidth: 2)
                         .background(Circle().fill(set.done ? ForgeColors.accent : Color.clear))
                         .frame(width: 24, height: 24)
-                        .frame(width: 44, height: 44)
+                        .frame(width: 40, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, -6)
 
                 WeightNumberField(weightLb: Binding(
                     get: { WeightUnit.lb(fromKg: set.weightKg) },
@@ -491,19 +497,25 @@ private struct WeightNumberField: View {
     @State private var text: String = ""
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Button { weightLb = max(0, weightLb - 5) } label: {
                 Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 22, height: 22).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
 
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 TextField("", text: $text)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
-                    .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 42)
+                    // Feature request — "increase text size of all editable number fields so it
+                    // is more visible and selectable." Was `.caption` (12pt) — bumped to `.body`
+                    // (14pt), matching `NumpadField`'s existing size elsewhere in the app rather
+                    // than introducing a third size. Wide enough for decimal weights like "135.5"
+                    // at the larger size without clipping, without being wider than it needs to be
+                    // — see the V2 spacing fix note on `SetRow` above for why width matters here.
+                    .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                    .frame(width: 50)
                     .focused($isFocused)
                     .onAppear { text = WeightUnit.trimmedDecimal(weightLb) }
                     .onChange(of: weightLb) { newValue in
@@ -528,12 +540,15 @@ private struct WeightNumberField: View {
                         guard let parsed = Double(filtered) else { return }
                         weightLb = min(1100, max(0, parsed))
                     }
+                // Fixed size + no line limit — the one view in this row with no explicit frame,
+                // so it's what silently absorbed the overflow before the V2 spacing fix.
                 Text("lb").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                    .lineLimit(1).fixedSize()
             }
 
             Button { weightLb = min(1100, weightLb + 5) } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 22, height: 22).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
         }
@@ -549,10 +564,10 @@ private struct RepsNumberField: View {
     @State private var text: String = ""
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Button { reps = max(1, reps - 1) } label: {
                 Image(systemName: "minus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 22, height: 22).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
 
@@ -562,8 +577,11 @@ private struct RepsNumberField: View {
             TextField("", text: $text)
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.trailing)
-                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-                .frame(width: 20)
+                // Feature request — "increase text size of all editable number fields." Same
+                // `.caption` → `.body` bump as `WeightNumberField`, widened enough for 2-digit
+                // reps at the larger size.
+                .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                .frame(width: 26)
                 .focused($isFocused)
                 .onAppear { text = String(reps) }
                 .onChange(of: reps) { newValue in
@@ -585,7 +603,7 @@ private struct RepsNumberField: View {
 
             Button { reps = min(50, reps + 1) } label: {
                 Image(systemName: "plus").font(.system(size: 11, weight: .bold)).foregroundStyle(ForgeColors.ink)
-                    .frame(width: 24, height: 24).background(ForgeColors.cardBackground).clipShape(Circle())
+                    .frame(width: 22, height: 22).background(ForgeColors.cardBackground).clipShape(Circle())
             }
             .buttonStyle(.plain)
         }

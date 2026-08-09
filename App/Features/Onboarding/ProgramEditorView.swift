@@ -381,8 +381,10 @@ private struct NumberField: View {
             TextField("", text: $text)
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.trailing)
-                .font(ForgeType.caption).foregroundStyle(ForgeColors.ink)
-                .frame(width: 44)
+                // Feature request — "increase text size of all editable number fields." Same
+                // `.caption` → `.body` bump as Train's weight/reps fields.
+                .font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                .frame(width: 50)
                 .focused($isFocused)
                 .onAppear { text = String(value) }
                 .onChange(of: value) { newValue in
@@ -418,6 +420,10 @@ struct ExercisePickerSheet: View {
     var onSelect: (Exercise) -> Void
     @State private var query = ""
     @State private var addingCustomExercise = false
+    // Bug fix — "edge case: when swapping and then creating a new exercise, offer the prompt to
+    // apply to all weeks or swap for current week." See the `.sheet(isPresented: $addingCustomExercise, ...)`
+    // modifier below for why this exists.
+    @State private var dismissAfterAddingCustomExercise = false
 
     // Custom exercises first — if a user bothered to add one, it's probably what they're after
     // right now, and there won't be many of them next to the bundled 873.
@@ -469,10 +475,26 @@ struct ExercisePickerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
-            .sheet(isPresented: $addingCustomExercise) {
+            // Bug fix — "edge case: when swapping and then creating a new exercise, offer the
+            // prompt to apply to all weeks or swap for current week." The picker's onAdd closure
+            // used to call this sheet's own `dismiss()` immediately, while `AddCustomExerciseSheet`
+            // (a *child* sheet presented on top of this one) was still on screen — dismissing an
+            // ancestor sheet mid-presentation of a still-open descendant sheet doesn't sequence
+            // properly, and silently dropped whatever presentation the caller tried to show right
+            // after (here, TrainSessionView's "apply to future weeks?" alert, triggered by
+            // `onSelect` a moment earlier). Closing the child sheet first (`addingCustomExercise
+            // = false`) and only dismissing this one from that child's own `onDismiss` completion —
+            // i.e. after it has actually finished closing — fixes the ordering.
+            .sheet(isPresented: $addingCustomExercise, onDismiss: {
+                if dismissAfterAddingCustomExercise {
+                    dismissAfterAddingCustomExercise = false
+                    dismiss()
+                }
+            }) {
                 AddCustomExerciseSheet(startingName: query) { exercise in
                     onSelect(exercise)
-                    dismiss()
+                    dismissAfterAddingCustomExercise = true
+                    addingCustomExercise = false
                 }
             }
         }
