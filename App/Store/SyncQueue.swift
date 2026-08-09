@@ -108,6 +108,14 @@ actor SyncQueue {
 
     var pendingCount: Int { pending.count }
 
+    // Feature request — "reset their profile." Without this, a write queued while offline (e.g. a
+    // profile save) could resurrect the very data `AppStore.resetProfile()` just deleted the next
+    // time this flushes.
+    func clearPending() {
+        pending.removeAll()
+        persist()
+    }
+
     private func perform(_ write: PendingWrite) async throws {
         switch write {
         case .profile(let profile, let program, let savedPrograms, let dayIndex, let programStartDate):

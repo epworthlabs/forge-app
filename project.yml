@@ -2,7 +2,12 @@ name: Forge
 options:
   bundleIdPrefix: com.epworthlabs
   deploymentTarget:
-    iOS: "16.0"
+    # Feature request — "rest timer as a lock-screen notification." Live Activities (ActivityKit)
+    # need 16.1 for the type itself, but `RestTimerActivityManager` uses the `ActivityContent`-based
+    # request/end APIs (which support `staleDate`) — those specifically need 16.2. Bumped
+    # project-wide rather than availability-guarding just the new code, since nothing else in the
+    # app needs to run below 16.2.
+    iOS: "16.2"
 packages:
   ForgeCore:
     path: .
@@ -22,6 +27,8 @@ targets:
         product: ForgeCore
       - package: PostHog
         product: PostHog
+      - target: RestTimerWidgetExtension
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.epworthlabs.forge
@@ -53,6 +60,10 @@ targets:
         # whether write access is actually used — Trakt is read-only (requestAuthorization always
         # passes toShare: []), confirmed by grepping HealthKitManager before adding this.
         NSHealthUpdateUsageDescription: "Trakt does not write any data to Health."
+        # Feature request — "rest timer as a lock-screen notification." Required for
+        # RestTimerActivityManager's Activity.request(...) to succeed at all — without it, every
+        # request silently fails.
+        NSSupportsLiveActivities: true
         # Every network call in the app is standard HTTPS/TLS (URLSession to USDA, Open Food
         # Facts, the FoodProxy, CloudKit, PostHog) — no custom/proprietary encryption — so this
         # qualifies for App Store Connect's export compliance exemption. Setting it explicitly
@@ -77,3 +88,28 @@ targets:
         # Re-added for launch — disconnected earlier this session only because it was blocking
         # Simulator testing with no team ID set (see DEVELOPMENT_TEAM above, now fixed).
         com.apple.developer.applesignin: [Default]
+
+  # Feature request — "rest timer as a lock-screen notification." A Live Activity's UI must be
+  # declared in a widget extension target — that's an ActivityKit requirement, not a choice; the
+  # main Forge target only starts/updates/ends the Activity (RestTimerActivityManager). Shares
+  # RestTimerAttributes.swift with the Forge target (added to both targets' sources below) since
+  # ActivityKit requires the exact same attributes type compiled into both sides.
+  RestTimerWidgetExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RestTimerWidget
+      - path: App/Store/RestTimerAttributes.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.epworthlabs.forge.RestTimerWidget
+        PRODUCT_NAME: RestTimerWidget
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 88XVUU2829
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "3"
+        SKIP_INSTALL: true
+    info:
+      path: RestTimerWidget/Info.plist

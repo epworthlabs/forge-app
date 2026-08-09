@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Trakt</string>
+	<string>Rest Timer</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,28 +15,15 @@
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
-	<string>APPL</string>
+	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Used to factor your steps and sleep into your daily targets.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>Trakt does not write any data to Health.</string>
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>UIAppFonts</key>
-	<array>
-		<string>Inter-Regular.ttf</string>
-		<string>Inter-Medium.ttf</string>
-		<string>Inter-SemiBold.ttf</string>
-		<string>Inter-Bold.ttf</string>
-		<string>Inter-ExtraBold.ttf</string>
-	</array>
-	<key>UILaunchScreen</key>
-	<dict/>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.widgetkit-extension</string>
+	</dict>
 </dict>
 </plist>

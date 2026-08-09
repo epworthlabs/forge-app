@@ -15,6 +15,10 @@ struct YouView: View {
     @State private var isPreparingExport = false
     @State private var exportedFiles: [URL] = []
     @State private var showingExportSheet = false
+    // Feature request — "users should have the option to reset their profile which basically gives
+    // them a fresh profile."
+    @State private var showingResetConfirmation = false
+    @State private var isResettingProfile = false
     // Bug fix — same investigation as the iCloud-account banner below: an available account
     // doesn't guarantee writes are actually reaching CloudKit (a container/entitlement problem
     // would still fail every write while reporting `.available`). A growing, never-shrinking
@@ -176,6 +180,29 @@ struct YouView: View {
                         }
                     }
 
+                    // Feature request — "users should have the option to reset their profile which
+                    // basically gives them a fresh profile." Separate card, isolated from the
+                    // settings above, since this is destructive and irreversible rather than a
+                    // preference toggle.
+                    GlassCard {
+                        Button {
+                            showingResetConfirmation = true
+                        } label: {
+                            HStack {
+                                Text("Reset Profile").font(ForgeType.body).foregroundStyle(.red)
+                                Spacer()
+                                if isResettingProfile {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "trash").foregroundStyle(.red).font(.body)
+                                }
+                            }
+                            .padding(.vertical, 13)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isResettingProfile)
+                    }
+
                     // FRG-122/FRG-121 — attribution both food-database sources require as a
                     // condition of free-tier use, not decorative: FatSecret's terms require a
                     // "Powered by FatSecret" credit, and Open Food Facts data is ODbL-licensed
@@ -192,6 +219,22 @@ struct YouView: View {
         .sheet(isPresented: $editingGoalTarget) { GoalTargetEditSheet() }
         .sheet(isPresented: $editingProfile) { ProfileEditSheet(currentWeightLb: WeightUnit.roundedLb(fromKg: store.profile.weightKg)) }
         .sheet(isPresented: $showingExportSheet) { ActivityShareSheet(items: exportedFiles) }
+        // V2 feedback — "I want the disclaimer to be a window not a bubble that pops out."
+        // `.alert` renders as a centered modal, unlike `.confirmationDialog`'s bottom action sheet.
+        .alert("Reset your profile?", isPresented: $showingResetConfirmation) {
+            Button("Reset Profile", role: .destructive) {
+                isResettingProfile = true
+                Task {
+                    await store.resetProfile()
+                    isResettingProfile = false
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            // V2 feedback — "don't bring the user back to on-boarding, just wipe the current data
+            // in Train, Eat and Progress." Profile/program/goals stay put; only history resets.
+            Text("This permanently deletes your training history, bodyweight log, and today's food log, and resets your program progress back to week 1, day 1. Your profile, goals, custom foods, exercises, and recipes are kept. This can't be undone.")
+        }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than
             // only right after the toggle flips.

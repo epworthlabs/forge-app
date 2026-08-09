@@ -255,4 +255,44 @@ actor CloudKitStore {
             return []
         }
     }
+
+    // MARK: Profile reset
+
+    /// Feature request — "users should have the option to reset their profile which basically
+    /// gives them a fresh profile" — later clarified (v2) to mean wiping Train/Eat/Progress data in
+    /// place, not actually signing the user out to onboarding. Deletes every year-chunked workout
+    /// session record, the bodyweight log, and a trailing window of food-day records — deliberately
+    /// leaves the profile record itself alone (the caller re-saves it with reset progress fields
+    /// right after this returns) and does *not* touch recipes/custom exercises/custom foods, which
+    /// are per-device library content, not "profile" data.
+    ///
+    /// Bug fix — "the stats for this week under Progress don't reset, prob because my food logged
+    /// from prev days didn't reset." Originally this only deleted *today's* food-day record — food
+    /// days are keyed one-per-calendar-day with no way to enumerate which ones actually have data
+    /// without reintroducing the `CKQuery` mechanism this file's header explains was deliberately
+    /// removed, so "delete all of them" isn't directly expressible. The fix takes the same approach
+    /// `CSVExporter` already uses for "full nutrition history": a deterministic, client-computed
+    /// window of the last 365 day-keys, covering any realistic lookback (`nutritionWeekSummary`
+    /// only reads the last 7). Batched via `modifyRecords` (not one `deleteRecord` await per day)
+    /// so this doesn't turn into hundreds of sequential round-trips; `atomically: false` means one
+    /// already-missing day in a batch doesn't fail the rest.
+    func deleteHistoryKeepingProfile() async {
+        var idsToDelete = [Self.bodyweightRecordID]
+        let currentYear = Calendar.current.component(.year, from: Date())
+        idsToDelete += ((currentYear - 9)...currentYear).map(Self.sessionsRecordID(year:))
+        for id in idsToDelete {
+            _ = try? await database.deleteRecord(withID: id)
+        }
+
+        let dayKeys = (0..<365).compactMap { offset -> String? in
+            Calendar.current.date(byAdding: .day, value: -offset, to: Date()).map(DayKey.string(for:))
+        }
+        let foodDayIDs = dayKeys.map(Self.foodDayRecordID)
+        var index = 0
+        while index < foodDayIDs.count {
+            let chunk = Array(foodDayIDs[index..<min(index + 100, foodDayIDs.count)])
+            index += 100
+            _ = try? await database.modifyRecords(saving: [], deleting: chunk, atomically: false)
+        }
+    }
 }

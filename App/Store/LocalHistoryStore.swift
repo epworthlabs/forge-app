@@ -61,4 +61,10 @@ enum LocalHistoryStore {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         try? data.write(to: storageURL)
     }
+
+    // Feature request — "reset their profile." Drops the local mirror so a relaunch after reset
+    // doesn't repopulate history from this device's own cache.
+    static func clear() {
+        try? FileManager.default.removeItem(at: storageURL)
+    }
 }

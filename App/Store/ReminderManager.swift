@@ -10,6 +10,7 @@ final class ReminderManager {
     static let shared = ReminderManager()
     private let workoutReminderID = "forge.reminder.workout"
     private let mealReminderID = "forge.reminder.meal"
+    private let restTimerZeroID = "forge.reminder.restTimerZero"
 
     private init() {}
 
@@ -61,6 +62,32 @@ final class ReminderManager {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [workoutReminderID, mealReminderID])
     }
 
+    // Feature request — "notifications for when the rest timer hits 0, reminding users to start
+    // their set." Time-interval based, not calendar-based — this is "N seconds from now," the same
+    // distinction `restEndDate` itself already makes over a stored countdown. Always requests
+    // authorization if needed, independent of the "Logging reminders" toggle
+    // (`scheduleEveningReminders` above) — that toggle gates once-a-day "did you forget" nags; this
+    // is an in-session timer, a different feature the user didn't ask to have bundled behind the
+    // same switch.
+    func scheduleRestTimerNotifications(endDate: Date) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [restTimerZeroID])
+        let secondsUntilZero = endDate.timeIntervalSinceNow
+        guard secondsUntilZero > 0 else { return }
+
+        Task {
+            guard await requestAuthorizationIfNeeded() else { return }
+            try? await center.add(makeTimeIntervalRequest(
+                id: restTimerZeroID, seconds: secondsUntilZero,
+                title: "Rest complete", body: "Time to start your next set."
+            ))
+        }
+    }
+
+    func cancelRestTimerNotifications() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [restTimerZeroID])
+    }
+
     private func makeRequest(id: String, hour: Int, minute: Int, title: String, body: String) -> UNNotificationRequest {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -72,6 +99,15 @@ final class ReminderManager {
         dateComponents.minute = minute
         let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: false)
 
+        return UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+    }
+
+    private func makeTimeIntervalRequest(id: String, seconds: TimeInterval, title: String, body: String) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, seconds), repeats: false)
         return UNNotificationRequest(identifier: id, content: content, trigger: trigger)
     }
 }

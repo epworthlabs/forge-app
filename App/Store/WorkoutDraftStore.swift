@@ -14,6 +14,9 @@ struct WorkoutDraft: Codable {
     var programDayIndex: Int
     var programWeek: Int
     var exercises: [ExerciseSlot]
+    /// Feature request — "the whole workout should be timed." Carried in the draft so a relaunch
+    /// mid-workout restores the real elapsed time instead of restarting the clock.
+    var startedAt: Date?
 }
 
 enum WorkoutDraftStore {

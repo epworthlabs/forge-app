@@ -115,14 +115,46 @@ final class AppStore: ObservableObject {
     @Published var todaysExercises: [ExerciseSlot] {
         didSet {
             WorkoutDraftStore.save(WorkoutDraft(
-                date: Date(), programDayIndex: currentProgramDayIndex, programWeek: activeWeek, exercises: todaysExercises
+                date: Date(), programDayIndex: currentProgramDayIndex, programWeek: activeWeek,
+                exercises: todaysExercises, startedAt: workoutStartedAt
             ))
         }
     }
+    // Feature request — "the whole workout should be timed so upon completion, users know how
+    // long their workout session was." Set once, on the first set checked off in a fresh session
+    // (see `toggleSet`); reset to nil whenever a new session's slate is built (`selectDay`,
+    // `activateProgram`, and after `archiveCompletedSession` archives the current one). Carried in
+    // `WorkoutDraft` so a relaunch mid-workout doesn't restart the clock.
+    @Published var workoutStartedAt: Date?
     // FRG-111 — a Date, not a countdown Int: computing "remaining = end − now" fresh each tick is
     // what makes this correct across backgrounding. A stored countdown would just freeze in the
     // background and read stale (in fact wrong) the moment the app returns to the foreground.
-    @Published var restEndDate: Date?
+    //
+    // Feature request — "notifications for when the rest timer hits 0... and a second notification
+    // when user goes -1 min." A `didSet` here (rather than a call at each of the two places that
+    // set this — `toggleSet` and the Reset button in `RestTimerCard`) means neither call site nor
+    // any future one can forget to (re)schedule the notifications when the rest period restarts.
+    @Published var restEndDate: Date? {
+        didSet {
+            if let restEndDate {
+                ReminderManager.shared.scheduleRestTimerNotifications(endDate: restEndDate)
+                // Feature request — "rest timer as an app notification... shows the timer on the
+                // lock screen." Same trigger point as the one-shot notification above, so neither
+                // can be added/changed without the other following along.
+                RestTimerActivityManager.shared.start(endDate: restEndDate, exerciseName: restExerciseName)
+            } else {
+                ReminderManager.shared.cancelRestTimerNotifications()
+                RestTimerActivityManager.shared.end()
+            }
+        }
+    }
+    // Feature request — Live Activity needs a label ("Bench Press", not just a bare countdown);
+    // `restEndDate`'s own didSet has no way to know which exercise just triggered it, so `toggleSet`
+    // sets this immediately beforehand. Not scoped tighter (e.g. passed as a didSet parameter)
+    // because `restEndDate` also gets reassigned directly from the Reset button in
+    // `RestTimerCard`, which has no exercise context of its own — reusing whatever name is already
+    // here is correct for that case, since Reset never changes which exercise is resting.
+    private var restExerciseName: String = "Rest"
     // Feature request — "when rest ends... go into negative timing." Deliberately not clamped to
     // 0 anymore: the caller (Train's rest card) is what decides how to display a negative value
     // as overtime, and when to fire the one-time haptic as it crosses zero.
@@ -296,6 +328,8 @@ final class AppStore: ObservableObject {
         currentProgramDayIndex = 0
         programStartDate = Date()
         activeWeek = 1
+        // A brand-new session slate — the previous one's clock (if any) doesn't carry over.
+        workoutStartedAt = nil
         todaysExercises = Self.buildExerciseSlots(for: selected, week: 1, dayIndex: 0)
         refreshLastPerformance()
         lastCompletedSession = nil
@@ -325,6 +359,8 @@ final class AppStore: ObservableObject {
     func selectDay(_ index: Int, week: Int? = nil) {
         currentProgramDayIndex = index
         activeWeek = week ?? currentProgramWeek
+        // A brand-new session slate — the previous one's clock (if any) doesn't carry over.
+        workoutStartedAt = nil
         todaysExercises = Self.buildExerciseSlots(for: program, week: activeWeek, dayIndex: index)
         refreshLastPerformance()
         lastCompletedSession = nil
@@ -576,22 +612,37 @@ final class AppStore: ObservableObject {
     // instead of just discarding them. Takes `exercises`/`dayIndex`/`week` as parameters rather
     // than reading `todaysExercises`/`currentProgramDayIndex`/`activeWeek` directly because the
     // draft-recovery caller archives a *previous* day's snapshot, not whatever's currently loaded.
+    // `startedAt` is the same story — the draft-recovery caller passes the *draft's* recorded
+    // start time, not whatever `workoutStartedAt` currently holds.
     @discardableResult
-    private func archiveCompletedSession(exercises: [ExerciseSlot], dayIndex: Int, week: Int) -> WorkoutSession? {
+    private func archiveCompletedSession(exercises: [ExerciseSlot], dayIndex: Int, week: Int, startedAt: Date?) -> WorkoutSession? {
         let completedSets = exercises.flatMap { slot in
             slot.sets.filter(\.done).map { SetLog(weightKg: $0.weightKg, reps: $0.reps, rpe: $0.rpe, exerciseName: slot.exercise.name) }
         }
         guard !completedSets.isEmpty else { return nil }
+        // A session just got archived — no more sets left to rest between, so any pending
+        // "time to start your next set" notification would fire after the fact.
+        ReminderManager.shared.cancelRestTimerNotifications()
+        RestTimerActivityManager.shared.end()
 
         // Feature request — "denote that specific workout was completed for the week." Tagged
         // with whichever day/week was actually being trained, not necessarily the real current
         // week (see `selectDay`), so completion tracking is correct even when catching up on a
         // different week. Also tagged with the active program's id — bug fix, "when I mark off
         // the first workout in a program, it marks off the first workout in other programs too."
-        let session = WorkoutSession(date: Date(), sets: completedSets, programDayIndex: dayIndex, programWeek: week, programID: program.id)
+        // Feature request — "the whole workout should be timed" — `durationSeconds` is nil only
+        // for a session with no recorded start (shouldn't happen in practice since `toggleSet`
+        // always sets one on the first completed set, but a missing start shouldn't crash or
+        // fabricate a number).
+        let durationSeconds = startedAt.map { Int(Date().timeIntervalSince($0).rounded()) }
+        let session = WorkoutSession(
+            date: Date(), sets: completedSets, programDayIndex: dayIndex, programWeek: week,
+            programID: program.id, durationSeconds: durationSeconds
+        )
         trailingSessions.append(session)
         // Feature request — congratulatory screen + review, reads this.
         lastCompletedSession = session
+        workoutStartedAt = nil
 
         // Feature request — "suggest the next workout depending on the week and what has already
         // been done" — the next not-yet-done day, rather than blindly rotating to "whatever's
@@ -615,7 +666,7 @@ final class AppStore: ObservableObject {
     }
 
     func finishWorkout() {
-        guard archiveCompletedSession(exercises: todaysExercises, dayIndex: currentProgramDayIndex, week: activeWeek) != nil else { return }
+        guard archiveCompletedSession(exercises: todaysExercises, dayIndex: currentProgramDayIndex, week: activeWeek, startedAt: workoutStartedAt) != nil else { return }
         persistProfile()
     }
 
@@ -705,11 +756,20 @@ final class AppStore: ObservableObject {
         todaysExercises[exIdx].sets.removeAll { $0.id == setID }
     }
 
+    // Feature request — "if user makes updates to the weights & reps, auto update weights & reps
+    // for the sets below it." Cascades only to not-yet-done sets after this one — same reasoning
+    // `applySuggestion` already uses: a set already marked done is a historical record of what was
+    // actually performed, not a target to silently overwrite. Editing an earlier set (done or not)
+    // still cascades forward; only *later*, already-done sets are left alone.
     func updateSet(exerciseID: ExerciseSlot.ID, setID: LoggedSet.ID, weightKg: Double, reps: Int) {
         guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }),
               let setIdx = todaysExercises[exIdx].sets.firstIndex(where: { $0.id == setID }) else { return }
         todaysExercises[exIdx].sets[setIdx].weightKg = weightKg
         todaysExercises[exIdx].sets[setIdx].reps = reps
+        for laterIdx in (setIdx + 1)..<todaysExercises[exIdx].sets.count where !todaysExercises[exIdx].sets[laterIdx].done {
+            todaysExercises[exIdx].sets[laterIdx].weightKg = weightKg
+            todaysExercises[exIdx].sets[laterIdx].reps = reps
+        }
     }
 
     func removeExercise(exerciseID: ExerciseSlot.ID) {
@@ -850,6 +910,7 @@ final class AppStore: ObservableObject {
         let staleExercises = todaysExercises
         let staleDayIndex = currentProgramDayIndex
         let staleWeek = activeWeek
+        let staleStartedAt = workoutStartedAt
         // New day: yesterday's meals must be cleared *before* the fetch below, since
         // loadHistoryFromCloudKit now merges (unions) into whatever's in memory — without this,
         // yesterday's entries would leak into today's diary.
@@ -857,7 +918,7 @@ final class AppStore: ObservableObject {
         // Fetch first: archiving appends to `trailingSessions`, and the archived session should
         // land on top of freshly merged history rather than racing the fetch.
         await loadHistoryFromCloudKit()
-        if archiveCompletedSession(exercises: staleExercises, dayIndex: staleDayIndex, week: staleWeek) != nil {
+        if archiveCompletedSession(exercises: staleExercises, dayIndex: staleDayIndex, week: staleWeek, startedAt: staleStartedAt) != nil {
             persistProfile()
         } else {
             activeWeek = currentProgramWeek
@@ -880,13 +941,16 @@ final class AppStore: ObservableObject {
         let isCurrentSlot = Calendar.current.isDateInToday(draft.date)
             && draft.programDayIndex == currentProgramDayIndex && draft.programWeek == activeWeek
         if isCurrentSlot {
+            // Restore the real elapsed-time clock too, before `todaysExercises` below re-persists
+            // the draft — otherwise a relaunch mid-workout would silently restart the timer.
+            workoutStartedAt = draft.startedAt
             todaysExercises = draft.exercises
             return
         }
         // Anything else — a previous day, or a slot that's no longer current (e.g. a different
         // day/program was selected since) — archive whatever was checked off under it rather than
         // just dropping it. No-op if nothing was actually checked off.
-        if archiveCompletedSession(exercises: draft.exercises, dayIndex: draft.programDayIndex, week: draft.programWeek) != nil {
+        if archiveCompletedSession(exercises: draft.exercises, dayIndex: draft.programDayIndex, week: draft.programWeek, startedAt: draft.startedAt) != nil {
             persistProfile()
         }
     }
@@ -901,8 +965,17 @@ final class AppStore: ObservableObject {
     func toggleSet(exerciseID: ExerciseSlot.ID, setID: LoggedSet.ID) {
         guard let exIdx = todaysExercises.firstIndex(where: { $0.id == exerciseID }),
               let setIdx = todaysExercises[exIdx].sets.firstIndex(where: { $0.id == setID }) else { return }
+        // Feature request — "the whole workout should be timed." Starts the clock on the first set
+        // checked off in a fresh session — set *before* the mutation below, so the draft persisted
+        // by `todaysExercises`'s didSet captures it on this same write, not the next one.
+        if !todaysExercises[exIdx].sets[setIdx].done && workoutStartedAt == nil {
+            workoutStartedAt = Date()
+        }
         todaysExercises[exIdx].sets[setIdx].done.toggle()
-        if todaysExercises[exIdx].sets[setIdx].done { restEndDate = Date().addingTimeInterval(TimeInterval(restDurationSeconds)) }
+        if todaysExercises[exIdx].sets[setIdx].done {
+            restExerciseName = todaysExercises[exIdx].exercise.name
+            restEndDate = Date().addingTimeInterval(TimeInterval(restDurationSeconds))
+        }
         // FRG-306 — no-op if no workout reminder is pending (reminders off, or already cancelled).
         if todaysExercises[exIdx].sets[setIdx].done { ReminderManager.shared.cancelWorkoutReminder() }
     }
@@ -980,5 +1053,37 @@ final class AppStore: ObservableObject {
         async let sleep = HealthKitManager.shared.fetchLastNightSleepHours()
         stepsToday = await steps
         lastNightSleepHours = await sleep
+    }
+
+    // Feature request — "users should have the option to reset their profile which basically gives
+    // them a fresh profile" — v2 clarified this should wipe the current Train/Eat/Progress data in
+    // place rather than sign the user back out to onboarding, so `profile`/`program` themselves are
+    // untouched here; only history/logs reset. Deliberately does not touch
+    // CustomExerciseStore/CustomFoodStore/RecipeStore — those are per-device library content the
+    // user built up, not profile/history data.
+    func resetProfile() async {
+        await CloudKitStore.shared.deleteHistoryKeepingProfile()
+        await SyncQueue.shared.clearPending()
+        LocalHistoryStore.clear()
+        WorkoutDraftStore.clear()
+
+        trailingSessions = []
+        lastCompletedSession = nil
+        mealEntries = [.breakfast: [], .lunch: [], .dinner: [], .snacks: []]
+        bodyweightLogLb = [(Date(), profile.weightKg / 0.45359237)]
+        workoutStartedAt = nil
+        currentProgramDayIndex = 0
+        programStartDate = Date()
+        activeWeek = 1
+        todaysExercises = Self.buildExerciseSlots(for: program, week: 1, dayIndex: 0)
+        persistLocalHistory()
+
+        await SyncQueue.shared.enqueue(.profile(
+            profile: profile, program: program, savedPrograms: savedPrograms,
+            dayIndex: currentProgramDayIndex, programStartDate: programStartDate
+        ))
+        await SyncQueue.shared.enqueue(.bodyweightLog(bodyweightLogLb.map { BodyweightEntry(date: $0.date, weightLb: $0.weightLb) }))
+        await SyncQueue.shared.enqueue(.foodDay(dayKey: DayKey.today, entries: mealEntries))
+        await SyncQueue.shared.enqueue(.workoutSessions([]))
     }
 }
