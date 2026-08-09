@@ -114,7 +114,12 @@ func makeProfile(goal: Goal = .maintain) -> UserProfile {
 
 @Suite struct ExerciseLibraryTests {
     @Test func loadsTheBundledDataset() {
-        #expect(ExerciseLibrary.all.count == 873)
+        // Feature request — "take the exercises here on this site [strengthlog.com] and put them
+        // into our list of workouts" added 243 (887 -> 1130), after deduping against the existing
+        // library so equipment-variant near-duplicates ("Bench Press" vs the existing "Barbell
+        // Bench Press - Medium Grip", "Squat" vs "Barbell Squat", etc.) weren't added twice under a
+        // different name.
+        #expect(ExerciseLibrary.all.count == 1130)
     }
 
     @Test func searchIsCaseInsensitiveAndMatchesPartialNames() {
@@ -125,7 +130,9 @@ func makeProfile(goal: Goal = .maintain) -> UserProfile {
 
     @Test func equipmentFilterReturnsOnlyMatchingExercises() {
         let bodyweightOnly = ExerciseLibrary.byEquipment("body only")
-        #expect(bodyweightOnly.count == 111)
+        // 114 -> 161 after the StrengthLog import above added a batch of body-only entries
+        // (push-up/lunge/plank/glute-bridge variants, etc).
+        #expect(bodyweightOnly.count == 161)
         #expect(bodyweightOnly.allSatisfy { $0.equipment == "body only" })
     }
 }
