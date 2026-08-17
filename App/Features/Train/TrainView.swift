@@ -168,7 +168,12 @@ private struct RestTimerCard: View {
                     }
                     Spacer()
                     IconButton(systemName: "pencil", action: { editingRestDuration = true }, size: 40)
-                    Button("Reset") { store.restEndDate = Date().addingTimeInterval(TimeInterval(store.restDurationSeconds)) }
+                    // Bug fix — "when I reset my rest timer don't start it automatically. only
+                    // start it when I complete a set of any exercise." Reset used to restart a
+                    // fresh countdown immediately, which reads as an auto-start the user never
+                    // asked for; it now just stops the timer, matching `toggleSet`'s doc comment
+                    // (rest should only ever start from checking off a set).
+                    Button("Reset") { store.restEndDate = nil }
                         .font(ForgeType.body).foregroundStyle(ForgeColors.accent)
                         .padding(.horizontal, 6)
                 }

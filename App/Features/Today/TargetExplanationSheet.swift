@@ -4,6 +4,7 @@ import ForgeCore
 struct TargetExplanationSheet: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    @State private var showingMethodology = false
 
     var body: some View {
         let target = store.nutritionTarget
@@ -32,9 +33,15 @@ struct TargetExplanationSheet: View {
 
             Text("Trakt's targets are estimates based on general formulas, not medical advice. Talk to a doctor or registered dietitian before making significant changes to your diet.")
                 .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted).padding(.top, 12)
+
+            Button { showingMethodology = true } label: {
+                Text("How this is calculated & sources").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
+            }
+            .padding(.top, 4)
         }
         .padding(22)
         .presentationDetents([.medium])
+        .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
     }
 
     private func signedKcal(_ value: Double) -> String {

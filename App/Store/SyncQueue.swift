@@ -22,6 +22,8 @@ enum PendingWrite: Codable {
     case foodDay(dayKey: String, entries: [Meal: [FoodEntry]])
     case bodyweightLog([BodyweightEntry])
     case recipes([Recipe])
+    case customExercises([Exercise])
+    case customFoods([FoodSearchResult])
 }
 
 actor SyncQueue {
@@ -128,6 +130,10 @@ actor SyncQueue {
             try await CloudKitStore.shared.saveBodyweightLog(entries)
         case .recipes(let recipes):
             try await CloudKitStore.shared.saveRecipes(recipes)
+        case .customExercises(let exercises):
+            try await CloudKitStore.shared.saveCustomExercises(exercises)
+        case .customFoods(let foods):
+            try await CloudKitStore.shared.saveCustomFoods(foods)
         }
     }
 
@@ -138,7 +144,8 @@ actor SyncQueue {
         pending.removeAll { existing in
             switch (existing, write) {
             case (.profile, .profile), (.workoutSessions, .workoutSessions),
-                 (.bodyweightLog, .bodyweightLog), (.recipes, .recipes):
+                 (.bodyweightLog, .bodyweightLog), (.recipes, .recipes),
+                 (.customExercises, .customExercises), (.customFoods, .customFoods):
                 return true
             case (.foodDay(let existingKey, _), .foodDay(let newKey, _)):
                 return existingKey == newKey

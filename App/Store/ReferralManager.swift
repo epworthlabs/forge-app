@@ -41,6 +41,17 @@ final class ReferralManager: ObservableObject {
         return "\(base) \(url)"
     }
 
+    // App Store Guideline 5.1.1(v) — account deletion. `myCode`/`isUnlocked` are local-only
+    // (never synced to CloudKit) but tied to this sign-in — left in place, a fresh sign-in on this
+    // device would silently inherit the deleted account's referral code and unlock state.
+    func resetForAccountDeletion() {
+        UserDefaults.standard.removeObject(forKey: Self.codeKey)
+        UserDefaults.standard.removeObject(forKey: Self.unlockedKey)
+        myCode = Self.randomCode()
+        UserDefaults.standard.set(myCode, forKey: Self.codeKey)
+        isUnlocked = false
+    }
+
     // Excludes 0/O/1/I so a typed-in code from a text message isn't ambiguous.
     private static func randomCode() -> String {
         let chars = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")

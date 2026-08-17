@@ -7,14 +7,32 @@ import ForgeCore
 /// `Recipe` via `RecipeStore`. `FoodSearchView` already merges saved recipes back into its own
 /// search results (as a single `FoodSearchResult` per recipe — see `Recipe.asFoodSearchResult`),
 /// so logging one afterward needs no dedicated code path at all.
+///
+/// Bug fix — "when I open my recipes I want to be able to edit them." `existingRecipe` switches
+/// this between "build a new one" and "edit an already-saved one" — same fields, just seeded from
+/// the recipe and saved via `RecipeStore.update` instead of `.add`.
 struct RecipeBuilderSheet: View {
     @Environment(\.dismiss) private var dismiss
+    var existingRecipe: Recipe?
     var onSave: (Recipe) -> Void
 
-    @State private var recipeName = ""
-    @State private var servingsText = "1"
-    @State private var ingredients: [RecipeIngredient] = []
+    @State private var recipeName: String
+    @State private var servingsText: String
+    @State private var ingredients: [RecipeIngredient]
     @State private var addingIngredient = false
+    // Bug fix — "see the quantities in which I logged each ingredient, whether grams, servings,
+    // etc." Tapping an already-added ingredient (rather than only the trash icon) reopens
+    // `PortionConfirmSheet` seeded with its actual saved quantity/unit, so it can be rescaled in
+    // place instead of only removed and re-added from scratch.
+    @State private var editingIngredient: RecipeIngredient?
+
+    init(existingRecipe: Recipe? = nil, onSave: @escaping (Recipe) -> Void) {
+        self.existingRecipe = existingRecipe
+        self.onSave = onSave
+        _recipeName = State(initialValue: existingRecipe?.name ?? "")
+        _servingsText = State(initialValue: String(existingRecipe?.servings ?? 1))
+        _ingredients = State(initialValue: existingRecipe?.ingredients ?? [])
+    }
 
     private var trimmedName: String { recipeName.trimmingCharacters(in: .whitespaces) }
     private var canSave: Bool { !trimmedName.isEmpty && !ingredients.isEmpty }
@@ -47,14 +65,24 @@ struct RecipeBuilderSheet: View {
                             Text("Add a few foods to build this recipe").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
                         }
 
+                        // Bug fix — "see the quantities in which I logged each ingredient." Tap
+                        // the row to rescale it, trash icon stays a separate sibling button (not
+                        // nested inside the row's Button — nesting one Button in another's label
+                        // is fragile in SwiftUI, same reasoning as the star button in
+                        // `FoodSearchView`'s result rows).
                         ForEach(ingredients) { ingredient in
                             HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(ingredient.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
-                                    Text("\(ingredient.kcal) kcal · \(Int(ingredient.proteinG))g P · \(Int(ingredient.carbG))g C · \(Int(ingredient.fatG))g F")
-                                        .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                Button {
+                                    editingIngredient = ingredient
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(ingredient.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                        Text("\(ingredient.quantityDescription) · \(ingredient.kcal) kcal · \(Int(ingredient.proteinG))g P · \(Int(ingredient.carbG))g C · \(Int(ingredient.fatG))g F")
+                                            .font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                Spacer()
+                                .buttonStyle(.plain)
                                 Button { ingredients.removeAll { $0.id == ingredient.id } } label: {
                                     Image(systemName: "trash").foregroundStyle(ForgeColors.inkMuted).font(.caption)
                                 }
@@ -74,12 +102,16 @@ struct RecipeBuilderSheet: View {
 
                         Button {
                             let servings = max(1, Int(servingsText) ?? 1)
-                            let recipe = Recipe(name: trimmedName, servings: servings, ingredients: ingredients)
-                            RecipeStore.shared.add(recipe)
+                            let recipe = Recipe(id: existingRecipe?.id ?? UUID(), name: trimmedName, servings: servings, ingredients: ingredients)
+                            if existingRecipe != nil {
+                                RecipeStore.shared.update(recipe)
+                            } else {
+                                RecipeStore.shared.add(recipe)
+                            }
                             onSave(recipe)
                             dismiss()
                         } label: {
-                            Text("Save Recipe").font(ForgeType.title).frame(maxWidth: .infinity)
+                            Text(existingRecipe == nil ? "Save Recipe" : "Save Changes").font(ForgeType.title).frame(maxWidth: .infinity)
                                 .padding(16).foregroundStyle(Color.white)
                         }
                         .buttonStyle(LiquidPrimaryButtonStyle())
@@ -91,7 +123,7 @@ struct RecipeBuilderSheet: View {
                 .dismissKeyboardOnTap()
                 .scrollDismissesKeyboard(.immediately)
             }
-            .navigationTitle("New Recipe")
+            .navigationTitle(existingRecipe == nil ? "New Recipe" : "Edit Recipe")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -101,7 +133,42 @@ struct RecipeBuilderSheet: View {
                     ingredients.append(ingredient)
                 }
             }
+            .sheet(item: $editingIngredient) { ingredient in
+                PortionConfirmSheet(
+                    food: asFoodSearchResult(ingredient), confirmButtonTitle: "Update Ingredient",
+                    initialQuantity: ingredient.quantity, initialUnit: ingredient.unit
+                ) { originalFood, quantity, unit, referenceGrams in
+                    let multiplier = PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: referenceGrams)
+                    let updated = RecipeIngredient(
+                        id: ingredient.id, name: originalFood.name,
+                        kcal: Int((Double(originalFood.kcal) * multiplier).rounded()),
+                        proteinG: originalFood.proteinG * multiplier,
+                        carbG: originalFood.carbG * multiplier,
+                        fatG: originalFood.fatG * multiplier,
+                        quantity: quantity, unit: unit, referenceGrams: referenceGrams,
+                        baseKcal: Double(originalFood.kcal), baseProteinG: originalFood.proteinG,
+                        baseCarbG: originalFood.carbG, baseFatG: originalFood.fatG
+                    )
+                    if let idx = ingredients.firstIndex(where: { $0.id == ingredient.id }) {
+                        ingredients[idx] = updated
+                    }
+                }
+            }
         }
+    }
+
+    // Reconstructs the per-1-unit "food" `PortionConfirmSheet` needs from an already-added
+    // ingredient's stored base macros, so re-opening it to rescale reads the same way logging it
+    // fresh did — `servingDescription` encodes `referenceGrams` back into text since that's how
+    // `FoodSearchResult.referenceGrams` recovers it (see that computed property's doc comment).
+    private func asFoodSearchResult(_ ingredient: RecipeIngredient) -> FoodSearchResult {
+        FoodSearchResult(
+            id: "ingredient-\(ingredient.id.uuidString)", name: ingredient.name,
+            kcal: Int(ingredient.effectiveBaseKcal.rounded()), proteinG: ingredient.effectiveBaseProteinG,
+            carbG: ingredient.effectiveBaseCarbG, fatG: ingredient.effectiveBaseFatG,
+            servingDescription: ingredient.referenceGrams.map { "per \(WeightUnit.trimmedDecimal($0))g" } ?? "1 serving",
+            source: .custom
+        )
     }
 }
 
@@ -177,6 +244,10 @@ private struct RecipeIngredientPickerSheet: View {
             isSearching = false
         }
         .sheet(item: $confirmingFood) { food in
+            // Bug fix — "see the quantities in which I logged each ingredient." Now records the
+            // quantity/unit/referenceGrams and base (per-1-unit) macros alongside the scaled
+            // snapshot, so this ingredient's portion can be redisplayed and re-edited later — see
+            // `RecipeIngredient`'s doc comment.
             PortionConfirmSheet(food: food, confirmButtonTitle: "Add Ingredient") { originalFood, quantity, unit, referenceGrams in
                 let multiplier = PortionScaling.multiplier(quantity: quantity, unit: unit, referenceGrams: referenceGrams)
                 let ingredient = RecipeIngredient(
@@ -184,7 +255,10 @@ private struct RecipeIngredientPickerSheet: View {
                     kcal: Int((Double(originalFood.kcal) * multiplier).rounded()),
                     proteinG: originalFood.proteinG * multiplier,
                     carbG: originalFood.carbG * multiplier,
-                    fatG: originalFood.fatG * multiplier
+                    fatG: originalFood.fatG * multiplier,
+                    quantity: quantity, unit: unit, referenceGrams: referenceGrams,
+                    baseKcal: Double(originalFood.kcal), baseProteinG: originalFood.proteinG,
+                    baseCarbG: originalFood.carbG, baseFatG: originalFood.fatG
                 )
                 onAdd(ingredient)
                 dismiss()

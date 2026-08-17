@@ -23,6 +23,35 @@ struct RecipeIngredient: Identifiable, Codable {
     var proteinG: Double
     var carbG: Double
     var fatG: Double
+    // Bug fix — "when I open my recipes I want to be able to edit them and see the quantities in
+    // which I logged each ingredient, whether I logged it in grams, servings, etc." Reproduces
+    // `FoodEntry`'s quantity/unit/referenceGrams + base-macro pattern: `kcal`/`proteinG`/`carbG`/
+    // `fatG` above stay the already-scaled amount (what `Recipe.totalKcal` etc. sum), these are the
+    // per-1-unit base the portion was scaled from, so a saved ingredient's quantity can be
+    // redisplayed and re-edited later instead of being an opaque scaled snapshot. All defaulted so
+    // recipes saved before this existed still decode fine — see `effectiveBase*` below.
+    var quantity: Double = 1
+    var unit: PortionUnit = .servings
+    var referenceGrams: Double? = nil
+    var baseKcal: Double? = nil
+    var baseProteinG: Double? = nil
+    var baseCarbG: Double? = nil
+    var baseFatG: Double? = nil
+}
+
+extension RecipeIngredient {
+    var effectiveBaseKcal: Double { baseKcal ?? Double(kcal) }
+    var effectiveBaseProteinG: Double { baseProteinG ?? proteinG }
+    var effectiveBaseCarbG: Double { baseCarbG ?? carbG }
+    var effectiveBaseFatG: Double { baseFatG ?? fatG }
+
+    /// "150 g", "1.5 servings", "3 oz" — how much of this ingredient went into the recipe, in
+    /// whichever unit it was originally logged in. A pre-existing ingredient with no recorded
+    /// quantity (saved before this field existed) reads as "1 serving," same fallback shape as
+    /// `FoodEntry.effectiveBase*`.
+    var quantityDescription: String {
+        "\(WeightUnit.trimmedDecimal(quantity)) \(unit.rawValue)"
+    }
 }
 
 struct Recipe: Identifiable, Codable {
@@ -91,6 +120,32 @@ final class RecipeStore: ObservableObject {
         persist()
         let snapshot = recipes
         Task { await SyncQueue.shared.enqueue(.recipes(snapshot)) }
+    }
+
+    // Bug fix — "when I open my recipes I want to be able to edit them." In-place replace by id
+    // rather than remove+add, so a recipe's position in the list doesn't jump to the end on edit.
+    func update(_ recipe: Recipe) {
+        guard let idx = recipes.firstIndex(where: { $0.id == recipe.id }) else { return }
+        recipes[idx] = recipe
+        persist()
+        let snapshot = recipes
+        Task { await SyncQueue.shared.enqueue(.recipes(snapshot)) }
+    }
+
+    // App Store Guideline 5.1.1(v) — account deletion. Local-only, no CloudKit push: the server
+    // record is deleted directly by `CloudKitStore.deleteAllData`, and pushing an empty-list save
+    // here would race it pointlessly.
+    func clearAll() {
+        recipes = []
+        persist()
+    }
+
+    // Bug fix — "I want the recipe to show the ingredients it contains when I click them as logged
+    // items." A logged `FoodEntry` only remembers the `FoodSearchResult.id` it came from
+    // (`FoodEntry.sourceFoodID`); `Recipe.asFoodSearchResult` mints that id as `"recipe-<uuid>"`, so
+    // this reverses the lookup back to the recipe that produced it.
+    func recipe(forFoodID foodID: String) -> Recipe? {
+        recipes.first { "recipe-\($0.id.uuidString)" == foodID }
     }
 
     // Bug fix — backfills recipes for a returning user (or a fresh reinstall) from CloudKit.

@@ -46,6 +46,12 @@ struct FoodEntry: Identifiable, Equatable, Codable {
     var baseProteinG: Double? = nil
     var baseCarbG: Double? = nil
     var baseFatG: Double? = nil
+    // Bug fix — "I want the recipe to show the ingredients it contains when I click them as logged
+    // items." The `FoodSearchResult.id` this entry was logged from (e.g. `"recipe-<uuid>"` for a
+    // recipe — see `Recipe.asFoodSearchResult`) — `FoodEntryEditSheet` uses this to look the recipe
+    // back up via `RecipeStore.recipe(forFoodID:)` and show its ingredients. nil for entries logged
+    // before this existed, or for any non-recipe food (no ingredient breakdown to show anyway).
+    var sourceFoodID: String? = nil
 }
 
 extension FoodEntry {
@@ -131,9 +137,15 @@ final class AppStore: ObservableObject {
     // background and read stale (in fact wrong) the moment the app returns to the foreground.
     //
     // Feature request — "notifications for when the rest timer hits 0... and a second notification
-    // when user goes -1 min." A `didSet` here (rather than a call at each of the two places that
-    // set this — `toggleSet` and the Reset button in `RestTimerCard`) means neither call site nor
-    // any future one can forget to (re)schedule the notifications when the rest period restarts.
+    // when user goes -1 min." A `didSet` here (rather than a call at `toggleSet`, the only place
+    // that starts a countdown) means that call site can't forget to schedule the notifications
+    // when the rest period starts.
+    //
+    // Bug fix — "when I reset my rest timer don't start it automatically. only start it when I
+    // complete a set." `RestTimerCard`'s Reset button used to reassign this to a fresh countdown
+    // directly, which is exactly the auto-start the user didn't want — it now sets `nil` instead,
+    // which this `didSet` already treats as "stop" (cancels notifications, ends the Live Activity).
+    // `toggleSet` remains the only call site that ever starts a countdown.
     @Published var restEndDate: Date? {
         didSet {
             if let restEndDate {
@@ -151,9 +163,8 @@ final class AppStore: ObservableObject {
     // Feature request — Live Activity needs a label ("Bench Press", not just a bare countdown);
     // `restEndDate`'s own didSet has no way to know which exercise just triggered it, so `toggleSet`
     // sets this immediately beforehand. Not scoped tighter (e.g. passed as a didSet parameter)
-    // because `restEndDate` also gets reassigned directly from the Reset button in
-    // `RestTimerCard`, which has no exercise context of its own — reusing whatever name is already
-    // here is correct for that case, since Reset never changes which exercise is resting.
+    // since `toggleSet` is the only call site that ever starts a countdown (`RestTimerCard`'s Reset
+    // button only ever clears it to `nil`, which needs no exercise name at all).
     private var restExerciseName: String = "Rest"
     // Feature request — "when rest ends... go into negative timing." Deliberately not clamped to
     // 0 anymore: the caller (Train's rest card) is what decides how to display a negative value
@@ -512,7 +523,8 @@ final class AppStore: ObservableObject {
             carbG: Int((result.carbG * multiplier).rounded()),
             fatG: Int((result.fatG * multiplier).rounded()),
             quantity: quantity, unit: unit, referenceGrams: referenceGrams,
-            baseKcal: Double(result.kcal), baseProteinG: result.proteinG, baseCarbG: result.carbG, baseFatG: result.fatG
+            baseKcal: Double(result.kcal), baseProteinG: result.proteinG, baseCarbG: result.carbG, baseFatG: result.fatG,
+            sourceFoodID: result.id
         )
         mealEntries[meal, default: []].append(entry)
 
@@ -1085,5 +1097,30 @@ final class AppStore: ObservableObject {
         await SyncQueue.shared.enqueue(.bodyweightLog(bodyweightLogLb.map { BodyweightEntry(date: $0.date, weightLb: $0.weightLb) }))
         await SyncQueue.shared.enqueue(.foodDay(dayKey: DayKey.today, entries: mealEntries))
         await SyncQueue.shared.enqueue(.workoutSessions([]))
+    }
+
+    // App Store Guideline 5.1.1(v) — "apps that support account creation must also offer the
+    // ability to initiate deletion of their account from within the app." Sign in with Apple +
+    // this private CloudKit database is this app's account, so this is a full wipe of everything
+    // `resetProfile` deliberately leaves alone (profile, recipes, custom exercises/foods — see that
+    // function's doc comment) plus local caches, pending syncs, scheduled reminders, and the Live
+    // Activity/rest timer — followed by actually signing out, which `RootView` reads to route back
+    // to `SignInView`. Order matters: CloudKit records are deleted first (nothing left to
+    // re-enqueue afterward), sign-out happens last (the instant `isSignedIn` flips, `RootView`
+    // swaps away from `MainTabView`, so nothing after this line should assume that view still exists).
+    func deleteAccount() async {
+        await CloudKitStore.shared.deleteAllData()
+        await SyncQueue.shared.clearPending()
+        LocalHistoryStore.clear()
+        WorkoutDraftStore.clear()
+        RecipeStore.shared.clearAll()
+        CustomExerciseStore.shared.clearAll()
+        CustomFoodStore.shared.clearAll()
+        ProfileSettings.shared.resetToDefaults()
+        ReferralManager.shared.resetForAccountDeletion()
+        ReminderManager.shared.cancelAll()
+        restEndDate = nil
+
+        AppleSignInManager.shared.signOut()
     }
 }

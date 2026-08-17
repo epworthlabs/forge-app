@@ -13,10 +13,12 @@ final class HealthKitManager {
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    // App Store review checks requested-vs-actually-used HealthKit scope; `.activeEnergyBurned`
+    // was requested here but nothing in the app ever reads it (only steps and sleep, matching
+    // `NSHealthShareUsageDescription`) — dropped rather than left as an unused, undisclosed grant.
     private var readTypes: Set<HKObjectType> {
         var types: Set<HKObjectType> = []
         if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) { types.insert(steps) }
-        if let activeEnergy = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) { types.insert(activeEnergy) }
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { types.insert(sleep) }
         return types
     }

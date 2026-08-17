@@ -4,6 +4,10 @@ struct EatView: View {
     @EnvironmentObject var store: AppStore
     @State private var searchingMeal: Meal?
     @State private var collapsedMeals: Set<Meal> = []
+    // App Store 1.4.1 — meal logging shows calorie/macro targets derived from health formulas
+    // (Mifflin-St Jeor, RED-S floor, etc); this surfaces their citations directly from this screen
+    // rather than only from Today/You, since that's the feature Apple's review flagged by name.
+    @State private var showingMethodology = false
 
     // Feature request — "allow users to go back and view their food logs from previous days."
     // 0 = today (the live, fully-editable in-memory state everything else already used); anything
@@ -54,6 +58,13 @@ struct EatView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Text(isToday ? "REMAINING" : "LOGGED").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted)
+                                if isToday {
+                                    Button { showingMethodology = true } label: {
+                                        Image(systemName: "info.circle").foregroundStyle(ForgeColors.inkMuted).font(.caption)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("How your nutrition target is calculated, with sources")
+                                }
                                 Spacer()
                                 Text(isToday ? "\(max(0, Int(target.calories) - totals.kcal)) kcal" : "\(totals.kcal) kcal")
                                     .font(ForgeType.title).foregroundStyle(ForgeColors.ink)
@@ -126,6 +137,7 @@ struct EatView: View {
         .sheet(item: $searchingMeal) { meal in
             FoodSearchView(meal: meal)
         }
+        .sheet(isPresented: $showingMethodology) { CalorieMethodologySheet() }
     }
 
     private static func dateLabel(_ date: Date) -> String {
@@ -206,6 +218,7 @@ private struct FoodEntryRow: View {
 private struct FoodEntryEditSheet: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var recipeStore = RecipeStore.shared
     let meal: Meal
     let entry: FoodEntry
 
@@ -225,6 +238,10 @@ private struct FoodEntryEditSheet: View {
         _referenceGrams = State(initialValue: entry.referenceGrams)
     }
 
+    // Bug fix — "I want the recipe to show the ingredients it contains when I click them as logged
+    // items." Traces this entry back to the `Recipe` it was logged from, if any.
+    private var sourceRecipe: Recipe? { entry.sourceFoodID.flatMap(recipeStore.recipe(forFoodID:)) }
+
     // Bug fix — "I can't change from servings to g or oz when I edit. Make it so I can." All 3
     // units are always offered now, not just when a gram reference happens to already be known
     // (e.g. an entry originally logged in plain servings, with nothing to scale grams against, was
@@ -241,66 +258,88 @@ private struct FoodEntryEditSheet: View {
     private var scaledFat: Double { entry.effectiveBaseFatG * multiplier }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Capsule().fill(ForgeColors.cardBorder).frame(width: 36, height: 4).frame(maxWidth: .infinity)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Capsule().fill(ForgeColors.cardBorder).frame(width: 36, height: 4).frame(maxWidth: .infinity)
 
-            Text("Edit Food").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+                Text("Edit Food").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
 
-            SelectAllTextField(text: $name, placeholder: "Name")
-                .frame(maxWidth: .infinity)
-                .padding(12)
-                .background(ForgeColors.tileBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            HStack(spacing: 10) {
-                TextField("Amount", text: $quantityText)
-                    .keyboardType(.decimalPad)
-                    .font(ForgeType.title)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .frame(width: 90)
+                SelectAllTextField(text: $name, placeholder: "Name")
+                    .frame(maxWidth: .infinity)
+                    .padding(12)
                     .background(ForgeColors.tileBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .focused($quantityFocused)
-                    .onChange(of: quantityFocused) { focused in
-                        if focused {
-                            quantityBeforeFocus = quantityText
-                            quantityText = ""
-                        } else if quantityText.isEmpty {
-                            quantityText = quantityBeforeFocus
+
+                HStack(spacing: 10) {
+                    TextField("Amount", text: $quantityText)
+                        .keyboardType(.decimalPad)
+                        .font(ForgeType.title)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .frame(width: 90)
+                        .background(ForgeColors.tileBackground)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .focused($quantityFocused)
+                        .onChange(of: quantityFocused) { focused in
+                            if focused {
+                                quantityBeforeFocus = quantityText
+                                quantityText = ""
+                            } else if quantityText.isEmpty {
+                                quantityText = quantityBeforeFocus
+                            }
                         }
+
+                    Picker("Unit", selection: $unit) {
+                        ForEach(availableUnits, id: \.self) { u in Text(u.rawValue).tag(u) }
                     }
-
-                Picker("Unit", selection: $unit) {
-                    ForEach(availableUnits, id: \.self) { u in Text(u.rawValue).tag(u) }
+                    .pickerStyle(.segmented)
+                    .onChange(of: unit) { newUnit in
+                        guard newUnit != .servings, referenceGrams == nil else { return }
+                        referenceGrams = 100
+                        quantityText = "100"
+                    }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: unit) { newUnit in
-                    guard newUnit != .servings, referenceGrams == nil else { return }
-                    referenceGrams = 100
-                    quantityText = "100"
+
+                HStack(spacing: 10) {
+                    PortionMacroTile(label: "kcal", value: "\(scaledKcal)")
+                    PortionMacroTile(label: "Protein", value: "\(Int(scaledProtein.rounded()))g")
+                    PortionMacroTile(label: "Carbs", value: "\(Int(scaledCarb.rounded()))g")
+                    PortionMacroTile(label: "Fat", value: "\(Int(scaledFat.rounded()))g")
                 }
-            }
 
-            HStack(spacing: 10) {
-                PortionMacroTile(label: "kcal", value: "\(scaledKcal)")
-                PortionMacroTile(label: "Protein", value: "\(Int(scaledProtein.rounded()))g")
-                PortionMacroTile(label: "Carbs", value: "\(Int(scaledCarb.rounded()))g")
-                PortionMacroTile(label: "Fat", value: "\(Int(scaledFat.rounded()))g")
-            }
+                // Bug fix — "I want the recipe to show the ingredients it contains when I click
+                // them as logged items." Read-only here — editing a recipe's own ingredients
+                // happens from My Recipes, not from a single day's logged entry.
+                if let sourceRecipe {
+                    Text("INGREDIENTS").font(ForgeType.label).foregroundStyle(ForgeColors.inkMuted).padding(.top, 4)
+                    ForEach(sourceRecipe.ingredients) { ingredient in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ingredient.name).font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                Text(ingredient.quantityDescription).font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                            }
+                            Spacer()
+                            Text("\(ingredient.kcal) kcal").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                        }
+                        .padding(10)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
 
-            Button {
-                store.updateFoodEntryPortion(id: entry.id, in: meal, name: name, quantity: quantity, unit: unit, referenceGrams: referenceGrams)
-                dismiss()
-            } label: {
-                Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
-                    .padding(16).foregroundStyle(Color.white)
+                Button {
+                    store.updateFoodEntryPortion(id: entry.id, in: meal, name: name, quantity: quantity, unit: unit, referenceGrams: referenceGrams)
+                    dismiss()
+                } label: {
+                    Text("Save").font(ForgeType.title).frame(maxWidth: .infinity)
+                        .padding(16).foregroundStyle(Color.white)
+                }
+                .buttonStyle(LiquidPrimaryButtonStyle())
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0)
+                .opacity(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0 ? 0.5 : 1)
             }
-            .buttonStyle(LiquidPrimaryButtonStyle())
-            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0)
-            .opacity(name.trimmingCharacters(in: .whitespaces).isEmpty || multiplier <= 0 ? 0.5 : 1)
+            .padding(22)
         }
-        .padding(22)
-        .presentationDetents([.medium])
+        .presentationDetents(sourceRecipe == nil ? [.medium] : [.medium, .large])
         .dismissKeyboardOnTap()
     }
 

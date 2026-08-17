@@ -19,6 +19,14 @@ struct YouView: View {
     // them a fresh profile."
     @State private var showingResetConfirmation = false
     @State private var isResettingProfile = false
+    // App Store Guideline 5.1.1(v) — "apps that support account creation must also offer the
+    // ability to initiate deletion of their account from within the app." `AppleSignInManager
+    // .signOut()` already existed but was never wired to any button; there was also no way to
+    // delete the account (data + sign-in) at all — only "Reset Profile," which explicitly keeps
+    // the profile/account. See `AppStore.deleteAccount`.
+    @State private var showingSignOutConfirmation = false
+    @State private var showingDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
     // Bug fix — same investigation as the iCloud-account banner below: an available account
     // doesn't guarantee writes are actually reaching CloudKit (a container/entitlement problem
     // would still fail every write while reporting `.available`). A growing, never-shrinking
@@ -203,6 +211,44 @@ struct YouView: View {
                         .disabled(isResettingProfile)
                     }
 
+                    // App Store Guideline 5.1.1(v) — sign-out and full account deletion. Grouped
+                    // together, separate from Reset Profile above (that keeps the account; these
+                    // two act on the account itself).
+                    GlassCard {
+                        VStack(spacing: 0) {
+                            Button {
+                                showingSignOutConfirmation = true
+                            } label: {
+                                HStack {
+                                    Text("Sign Out").font(ForgeType.body).foregroundStyle(ForgeColors.ink)
+                                    Spacer()
+                                    Image(systemName: "rectangle.portrait.and.arrow.right").foregroundStyle(ForgeColors.inkMuted).font(.body)
+                                }
+                                .padding(.vertical, 13)
+                            }
+                            .buttonStyle(.plain)
+
+                            Divider().overlay(ForgeColors.cardBorder)
+
+                            Button {
+                                showingDeleteAccountConfirmation = true
+                            } label: {
+                                HStack {
+                                    Text("Delete Account").font(ForgeType.body).foregroundStyle(.red)
+                                    Spacer()
+                                    if isDeletingAccount {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "trash").foregroundStyle(.red).font(.body)
+                                    }
+                                }
+                                .padding(.vertical, 13)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isDeletingAccount)
+                        }
+                    }
+
                     // FRG-122/FRG-121 — attribution both food-database sources require as a
                     // condition of free-tier use, not decorative: FatSecret's terms require a
                     // "Powered by FatSecret" credit, and Open Food Facts data is ODbL-licensed
@@ -234,6 +280,24 @@ struct YouView: View {
             // V2 feedback — "don't bring the user back to on-boarding, just wipe the current data
             // in Train, Eat and Progress." Profile/program/goals stay put; only history resets.
             Text("This permanently deletes your training history, bodyweight log, and today's food log, and resets your program progress back to week 1, day 1. Your profile, goals, custom foods, exercises, and recipes are kept. This can't be undone.")
+        }
+        .alert("Sign out?", isPresented: $showingSignOutConfirmation) {
+            Button("Sign Out", role: .destructive) { AppleSignInManager.shared.signOut() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You can sign back in with the same Apple ID any time — nothing is deleted.")
+        }
+        .alert("Delete your account?", isPresented: $showingDeleteAccountConfirmation) {
+            Button("Delete Account", role: .destructive) {
+                isDeletingAccount = true
+                Task {
+                    await store.deleteAccount()
+                    isDeletingAccount = false
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your profile, training history, food log, recipes, and custom exercises/foods, and signs you out. This can't be undone.")
         }
         .task {
             // Returning users with Health sync already on: refresh on each visit rather than

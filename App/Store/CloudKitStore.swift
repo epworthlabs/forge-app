@@ -256,6 +256,56 @@ actor CloudKitStore {
         }
     }
 
+    // MARK: Custom exercises/foods — same whole-blob-on-a-fixed-ID pattern as Recipes.
+    //
+    // Bug fix — "when I reinstall the app, it doesn't remember my custom workouts or my food."
+    // These used to be Application Support-only (see CustomExerciseStore/CustomFoodStore's old
+    // header comments), which is wiped along with the rest of the app's local container on
+    // uninstall — same root cause FRG-383 already fixed for recipes/sessions/bodyweight. The
+    // private CloudKit database is still never shared with other users (or exposed publicly), so
+    // this doesn't reopen the "don't make it publicly shared" concern that motivated device-local
+    // storage in the first place — it only means a reinstall (or another of the user's own signed-in
+    // devices) now recovers this data too.
+
+    private static let customExercisesRecordID = CKRecord.ID(recordName: "customExercises")
+
+    func saveCustomExercises(_ exercises: [Exercise]) async throws {
+        let record = (try? await database.record(for: Self.customExercisesRecordID)) ?? CKRecord(recordType: "CustomExerciseList", recordID: Self.customExercisesRecordID)
+        // Whole-list replace, not a union — custom exercises are deletable, and a union would
+        // resurrect deleted ones. CustomExerciseStore's merge-on-load covers the fresh-install
+        // direction instead.
+        record["exercisesJSON"] = try JSONEncoder().encode(exercises)
+        _ = try await database.save(record)
+    }
+
+    func fetchCustomExercises() async throws -> [Exercise] {
+        do {
+            let record = try await database.record(for: Self.customExercisesRecordID)
+            guard let data = record["exercisesJSON"] as? Data else { return [] }
+            return (try? JSONDecoder().decode([Exercise].self, from: data)) ?? []
+        } catch let error as CKError where error.code == .unknownItem {
+            return []
+        }
+    }
+
+    private static let customFoodsRecordID = CKRecord.ID(recordName: "customFoods")
+
+    func saveCustomFoods(_ foods: [FoodSearchResult]) async throws {
+        let record = (try? await database.record(for: Self.customFoodsRecordID)) ?? CKRecord(recordType: "CustomFoodList", recordID: Self.customFoodsRecordID)
+        record["foodsJSON"] = try JSONEncoder().encode(foods)
+        _ = try await database.save(record)
+    }
+
+    func fetchCustomFoods() async throws -> [FoodSearchResult] {
+        do {
+            let record = try await database.record(for: Self.customFoodsRecordID)
+            guard let data = record["foodsJSON"] as? Data else { return [] }
+            return (try? JSONDecoder().decode([FoodSearchResult].self, from: data)) ?? []
+        } catch let error as CKError where error.code == .unknownItem {
+            return []
+        }
+    }
+
     // MARK: Profile reset
 
     /// Feature request — "users should have the option to reset their profile which basically
@@ -277,6 +327,13 @@ actor CloudKitStore {
     /// so this doesn't turn into hundreds of sequential round-trips; `atomically: false` means one
     /// already-missing day in a batch doesn't fail the rest.
     func deleteHistoryKeepingProfile() async {
+        await deleteHistoryRecords()
+    }
+
+    // Shared by `deleteHistoryKeepingProfile` (profile reset) and `deleteAllData` (account
+    // deletion) — bodyweight, year-chunked sessions, and a trailing food-day window, the same
+    // "history" scope either way.
+    private func deleteHistoryRecords() async {
         var idsToDelete = [Self.bodyweightRecordID]
         let currentYear = Calendar.current.component(.year, from: Date())
         idsToDelete += ((currentYear - 9)...currentYear).map(Self.sessionsRecordID(year:))
@@ -293,6 +350,23 @@ actor CloudKitStore {
             let chunk = Array(foodDayIDs[index..<min(index + 100, foodDayIDs.count)])
             index += 100
             _ = try? await database.modifyRecords(saving: [], deleting: chunk, atomically: false)
+        }
+    }
+
+    // MARK: Account deletion
+
+    /// App Store Guideline 5.1.1(v) — "apps that support account creation must also offer the
+    /// ability to initiate deletion of their account from within the app." Sign in with Apple +
+    /// this private CloudKit database is this app's account, so deletion means every record this
+    /// file ever writes, not just the history `deleteHistoryKeepingProfile` covers for profile
+    /// reset — profile, recipes, and custom exercises/foods too, none of which "reset" touches on
+    /// purpose (see that function's doc comment). `AppStore.deleteAccount` is the full orchestration
+    /// (this plus clearing local caches/SyncQueue/sign-in state); this method only owns the server side.
+    func deleteAllData() async {
+        await deleteHistoryRecords()
+        let idsToDelete = [Self.profileRecordID, Self.recipesRecordID, Self.customExercisesRecordID, Self.customFoodsRecordID]
+        for id in idsToDelete {
+            _ = try? await database.deleteRecord(withID: id)
         }
     }
 }

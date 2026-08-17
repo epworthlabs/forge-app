@@ -86,9 +86,16 @@ entirely:
 
 Every CloudKit fetch **merges** (union by id/timestamp) into whatever's already in memory rather than
 replacing it — a fetch can never wipe out something logged moments ago that hasn't round-tripped yet.
-`CustomExerciseStore`/`CustomFoodStore` are the one exception that stays device-local only, by design
-("don't make it publicly shared, we don't know how reliable their inputs are" — a per-device custom
-food/exercise shouldn't propagate to other devices or other users).
+
+`CustomExerciseStore`/`CustomFoodStore` used to be the one exception that stayed device-local only
+(Application Support, never synced) — a deliberate call for "don't make it publicly shared, we don't
+know how reliable their inputs are." Bug fix — "when I reinstall the app, it doesn't remember my
+custom workouts or my food": Application Support is wiped along with the rest of the app's local
+container on uninstall, same root cause FRG-383 already fixed for recipes/sessions/bodyweight. Both
+now sync through `SyncQueue`/`CloudKitStore` exactly like `RecipeStore` (whole-list replace on save,
+merge-on-load for the fresh-install direction) — CloudKit's private database is still never shared
+with other users or exposed publicly, so this doesn't reopen that concern, it just also means a
+reinstall (or another of the user's own signed-in devices) recovers the data too.
 
 ### Program/week model
 
@@ -113,7 +120,10 @@ Editing has two distinct, deliberately separate scopes: swap/add/remove/reorder 
 `TrainSessionView` are session-only (never touch `program`) unless the user explicitly confirms
 "apply to future weeks" (`applyTodaysChangesToFutureWeeks`); the program editor
 (`App/Features/Onboarding/ProgramEditorView.swift` — used from both onboarding and Train's "Edit
-Program") is the durable path.
+Program") is the durable path. Both now expose the same "Swap Exercise" action from each exercise
+row's `···` menu (`ExerciseRowEditor.onSwap` here, `ExerciseCard`'s menu in `TrainView.swift`) — the
+durable side just overwrites `exerciseName` in place via `ExercisePickerSheet`, no logged-set/
+last-performance state to carry over like the session-side `AppStore.swapExercise` handles.
 
 ### Food data: four sources merged in one place
 

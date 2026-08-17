@@ -2,11 +2,17 @@ import Foundation
 import ForgeCore
 
 /// Feature request — "I want users to be able to add their own foods on their own devices, don't
-/// make it publicly shared though, we don't know how reliable their inputs are." Same tradeoff
-/// `CustomExerciseStore` already makes for its own device-local additions: persisted locally
-/// (Application Support), never synced through `SyncQueue`/CloudKit — so one user's possibly-wrong
-/// entry never ends up in another user's search results. Distinct from `CuratedFoodLibrary`,
-/// which *is* shared with every user, but only ever hand-edited by the developer.
+/// make it publicly shared though, we don't know how reliable their inputs are." Distinct from
+/// `CuratedFoodLibrary`, which *is* shared with every user, but only ever hand-edited by the
+/// developer.
+///
+/// Bug fix — "when I reinstall the app, it doesn't remember my custom food." This used to be
+/// Application Support-only, which is wiped along with the rest of the app's local container on
+/// uninstall. Now synced through `SyncQueue`/`CloudKitStore`, same fix already applied to
+/// `RecipeStore` for the identical complaint — still private (CloudKit's private database is never
+/// shared with other users, so one user's possibly-wrong entry still never ends up in another
+/// user's search results), it just also survives a reinstall. The local JSON cache stays too, so
+/// foods are still available instantly offline.
 @MainActor
 final class CustomFoodStore: ObservableObject {
     static let shared = CustomFoodStore()
@@ -36,12 +42,44 @@ final class CustomFoodStore: ObservableObject {
         )
         foods.append(food)
         persist()
+        let snapshot = foods
+        Task { await SyncQueue.shared.enqueue(.customFoods(snapshot)) }
         return food
     }
 
     func remove(_ food: FoodSearchResult) {
         foods.removeAll { $0.id == food.id }
         persist()
+        let snapshot = foods
+        Task { await SyncQueue.shared.enqueue(.customFoods(snapshot)) }
+    }
+
+    // App Store Guideline 5.1.1(v) — account deletion. Local-only, no CloudKit push: the server
+    // record is deleted directly by `CloudKitStore.deleteAllData`.
+    func clearAll() {
+        foods = []
+        persist()
+    }
+
+    // Bug fix — backfills custom foods for a returning user (or a fresh reinstall) from CloudKit.
+    // Called once after sign-in, same pattern as `RecipeStore.loadFromCloudKit`. Merges rather than
+    // overwrites: a food added while offline (queued in SyncQueue, not yet actually saved to
+    // CloudKit) would otherwise vanish the moment this fetch runs and replaces `foods` outright. If
+    // the merge found local-only foods the server doesn't have, push the union back up so the
+    // server heals too.
+    func loadFromCloudKit() async {
+        guard let fetched = try? await CloudKitStore.shared.fetchCustomFoods() else {
+            print("[CloudKit] custom foods fetch failed")
+            return
+        }
+        let fetchedIDs = Set(fetched.map(\.id))
+        let localOnly = foods.filter { !fetchedIDs.contains($0.id) }
+        foods = fetched + localOnly
+        persist()
+        if !localOnly.isEmpty {
+            let snapshot = foods
+            Task { await SyncQueue.shared.enqueue(.customFoods(snapshot)) }
+        }
     }
 
     private func persist() {

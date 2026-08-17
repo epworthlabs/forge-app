@@ -29,6 +29,14 @@ final class ProfileSettings: ObservableObject {
         avatarImageData = UserDefaults.standard.data(forKey: Self.avatarKey)
     }
 
+    // App Store Guideline 5.1.1(v) — account deletion. `username`/`avatarImageData` are local-only
+    // (never synced to CloudKit) but still personal data tied to this sign-in — left in place, a
+    // fresh sign-in on this device would silently inherit the deleted account's username/avatar.
+    func resetToDefaults() {
+        username = Self.randomUsername()
+        avatarImageData = nil
+    }
+
     private static func randomUsername() -> String {
         let adjectives = ["Swift", "Iron", "Steel", "Quiet", "Bold", "Rapid", "Solid", "Prime", "Wild", "Calm", "Sharp", "Lean"]
         let nouns = ["Lifter", "Athlete", "Runner", "Climber", "Grinder", "Warrior", "Falcon", "Tiger", "Wolf", "Ranger"]

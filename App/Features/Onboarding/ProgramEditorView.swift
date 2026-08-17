@@ -127,15 +127,26 @@ struct ProgramEditorView: View {
                                 Text("Copy Week \(selectedWeek) to all future weeks").font(ForgeType.caption).foregroundStyle(ForgeColors.accent)
                             }
                             .buttonStyle(.plain)
-                            .confirmationDialog(
-                                "Copy Week \(selectedWeek)'s exercises to weeks \(selectedWeek + 1)–\(weekCount)? This replaces their current content.",
-                                isPresented: $copyConfirmationShown, titleVisibility: .visible
+                            // Bug fix — "when I hit copy week X to all future weeks, I want it as a
+                            // window not a bubble." Same complaint, same fix as `YouView`'s profile
+                            // reset confirmation: a centered `.alert` reads as a deliberate
+                            // confirmation, not a `.confirmationDialog` action sheet.
+                            //
+                            // Bug fix — "update the copy for this window to something more concise
+                            // so it fits better." The original title/message repeated the button's
+                            // own "to all future weeks" phrasing and spelled out the exact week
+                            // range twice; trimmed to what the confirmation actually needs to say.
+                            .alert(
+                                "Copy Week \(selectedWeek)?",
+                                isPresented: $copyConfirmationShown
                             ) {
                                 Button("Copy") {
                                     let source = currentDaysBinding.wrappedValue
                                     for week in (selectedWeek + 1)...weekCount { weeks[week] = source }
                                 }
                                 Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("Replaces weeks \(selectedWeek + 1)–\(weekCount) with Week \(selectedWeek).")
                             }
                         }
 
@@ -212,6 +223,13 @@ struct DayEditor: View {
     var onAddExercise: () -> Void
     var onDeleteDay: (() -> Void)?
 
+    // Feature request — "when I edit my program I want to also be able to swap my exercises in
+    // the more menu." Mirrors `TrainView.ExerciseCard`'s "Swap Exercise" menu item, but simpler:
+    // this is a durable template, not an active session, so there's no logged-set/last-performance
+    // state to carry over — just the exercise identity changes, targetSets/Reps/Weight stay as
+    // already prescribed.
+    @State private var swappingExerciseID: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -238,6 +256,8 @@ struct DayEditor: View {
                     withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
                         moveExerciseToBottom(id: exercise.id)
                     }
+                } onSwap: {
+                    swappingExerciseID = exercise.id
                 }
             }
 
@@ -251,6 +271,12 @@ struct DayEditor: View {
         .padding(16)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .sheet(isPresented: Binding(get: { swappingExerciseID != nil }, set: { if !$0 { swappingExerciseID = nil } })) {
+            ExercisePickerSheet { exercise in
+                guard let id = swappingExerciseID, let idx = day.exercises.firstIndex(where: { $0.id == id }) else { return }
+                day.exercises[idx].exerciseName = exercise.name
+            }
+        }
     }
 
     // Feature request — "rearrange exercises under workouts," durable-program-editor side (see
@@ -292,6 +318,7 @@ private struct ExerciseRowEditor: View {
     var onDrop: (String) -> Void
     var onMoveToTop: () -> Void
     var onMoveToBottom: () -> Void
+    var onSwap: () -> Void
     // Bug fix — "the reordering function is janky... when you drag it should have a ghost of the
     // card." Same treatment as `TrainView.ExerciseCard`'s equivalent.
     @State private var isDropTarget = false
@@ -320,6 +347,11 @@ private struct ExerciseRowEditor: View {
                 Menu {
                     Button(action: onMoveToTop) { Label("Move to Top", systemImage: "arrow.up.to.line") }
                     Button(action: onMoveToBottom) { Label("Move to Bottom", systemImage: "arrow.down.to.line") }
+                    Divider()
+                    // Feature request — "when I edit my program I want to also be able to swap my
+                    // exercises in the more menu." Same "Swap Exercise" entry TrainView's session
+                    // menu already has.
+                    Button(action: onSwap) { Label("Swap Exercise", systemImage: "arrow.left.arrow.right") }
                 } label: {
                     Image(systemName: "ellipsis.circle").foregroundStyle(ForgeColors.inkMuted).font(.system(size: 16))
                         .frame(width: 30, height: 36)

@@ -94,6 +94,10 @@ struct RootView: View {
                 // Bug fix — "my recipes weren't saved [after reinstall]." Backfills from CloudKit
                 // the same way workout/food/bodyweight history does above.
                 await RecipeStore.shared.loadFromCloudKit()
+                // Bug fix — "when I reinstall the app, it doesn't remember my custom workouts or
+                // my food." Same backfill as recipes, now that these are CloudKit-synced too.
+                await CustomExerciseStore.shared.loadFromCloudKit()
+                await CustomFoodStore.shared.loadFromCloudKit()
                 store = loadedStore
             }
             isLoadingProfile = false

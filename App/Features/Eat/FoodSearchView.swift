@@ -250,14 +250,19 @@ struct PortionConfirmSheet: View {
     @FocusState private var quantityFocused: Bool
     @State private var quantityBeforeFocus: String = ""
 
-    init(food: FoodSearchResult, confirmButtonTitle: String, onConfirm: @escaping (FoodSearchResult, Double, PortionUnit, Double?) -> Void) {
+    // Bug fix — "when I open my recipes I want to be able to edit them and see the quantities in
+    // which I logged each ingredient." `RecipeBuilderSheet` reopens this sheet to re-scale an
+    // already-added ingredient, and needs it seeded with that ingredient's actual saved
+    // quantity/unit rather than always defaulting to the reference-gram amount — every other call
+    // site (logging a food/ingredient fresh) leaves these nil and gets the old default behavior.
+    init(food: FoodSearchResult, confirmButtonTitle: String, initialQuantity: Double? = nil, initialUnit: PortionUnit? = nil, onConfirm: @escaping (FoodSearchResult, Double, PortionUnit, Double?) -> Void) {
         self.food = food
         self.confirmButtonTitle = confirmButtonTitle
         self.onConfirm = onConfirm
         let grams = food.referenceGrams
         referenceGrams = grams
-        _unit = State(initialValue: grams != nil ? .g : .servings)
-        _quantityText = State(initialValue: grams != nil ? WeightUnit.trimmedDecimal(grams!) : "1")
+        _unit = State(initialValue: initialUnit ?? (grams != nil ? .g : .servings))
+        _quantityText = State(initialValue: initialQuantity.map { WeightUnit.trimmedDecimal($0) } ?? (grams != nil ? WeightUnit.trimmedDecimal(grams!) : "1"))
     }
 
     private var availableUnits: [PortionUnit] { referenceGrams != nil ? [.g, .oz, .servings] : [.servings] }
