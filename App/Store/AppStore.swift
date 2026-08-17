@@ -1108,7 +1108,26 @@ final class AppStore: ObservableObject {
     // to `SignInView`. Order matters: CloudKit records are deleted first (nothing left to
     // re-enqueue afterward), sign-out happens last (the instant `isSignedIn` flips, `RootView`
     // swaps away from `MainTabView`, so nothing after this line should assume that view still exists).
+    //
+    // Bug fix — "I'm still coming back to old workout data." `deleteAllData()`'s CloudKit round
+    // trip takes real wall-clock time, and `MainTabView`/`YouView` stay bound to *this exact
+    // instance* the whole time sign-out hasn't happened yet. `todaysExercises`'s didSet
+    // unconditionally re-saves `WorkoutDraftStore`, and `persistLocalHistory()` (fired by session/
+    // meal/weight changes) re-writes `LocalHistoryStore` from whatever's still in `trailingSessions`
+    // /`mealEntries`/`bodyweightLogLb` — so clearing the on-disk mirrors first, like the old version
+    // of this function did, left a window where anything still touching this instance during that
+    // network round trip could resurrect exactly the files just cleared. Zeroing the in-memory
+    // state *before* the CloudKit call closes that window: even a stray write during the deletion
+    // just re-persists empty data.
     func deleteAccount() async {
+        trailingSessions = []
+        lastCompletedSession = nil
+        mealEntries = [.breakfast: [], .lunch: [], .dinner: [], .snacks: []]
+        bodyweightLogLb = []
+        workoutStartedAt = nil
+        todaysExercises = []
+        restEndDate = nil
+
         await CloudKitStore.shared.deleteAllData()
         await SyncQueue.shared.clearPending()
         LocalHistoryStore.clear()
@@ -1119,7 +1138,6 @@ final class AppStore: ObservableObject {
         ProfileSettings.shared.resetToDefaults()
         ReferralManager.shared.resetForAccountDeletion()
         ReminderManager.shared.cancelAll()
-        restEndDate = nil
 
         AppleSignInManager.shared.signOut()
     }

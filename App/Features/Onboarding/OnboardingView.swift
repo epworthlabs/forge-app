@@ -11,17 +11,17 @@ struct OnboardingView: View {
             ForgeColors.backgroundWash
             VStack(alignment: .leading, spacing: 18) {
                 // Feature request — "include the logo in the app where you see fit."
-                HStack(spacing: 8) {
-                    Image("AppMark")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 26, height: 26)
-                    Image("TraktLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 15)
-                }
-                .padding(.bottom, 4)
+                //
+                // Bug fix — "the heading is not polished, update the logo and icon." `TraktLogo`
+                // was a flat wordmark baked onto its own white rounded-rect card background (looks
+                // like a screenshot of a UI element, not a transparent logo) — visibly mismatched
+                // against this screen's light gradient wash. Replaced with plain text.
+                //
+                // Bug fix — "get rid of the app icon on onboarding, it's actually old." `AppMark`
+                // (the replacement above briefly used) is a stale icon design — dropped rather
+                // than swapped, since nothing here actually needs an icon next to the text.
+                Text("Welcome to Trakt").font(ForgeType.title).foregroundStyle(ForgeColors.ink)
+                    .padding(.bottom, 4)
 
                 StepDots(current: model.step, total: 4)
                 Text("Step \(model.step) of 4")
@@ -402,14 +402,29 @@ private struct ProgramSelectStep: View {
             // Feature request — referral wall on Progress's Lift Progression section: whoever
             // invited this person unlocks it once this field is filled in and onboarding finishes.
             // Optional — most people arrive without one.
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Invite code (optional)").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
-                SelectAllTextField(text: $inviteCode, placeholder: "e.g. 7K2P9Q", autocapitalization: .allCharacters, autocorrection: .no)
+            //
+            // Bug fix — "the invite code section is too large, make it a one-liner and make more
+            // space for the actual programs." Was a label stacked above a full-height padded field
+            // (two lines); collapsed to a single row so the program list's ScrollView — squeezed
+            // into whatever's left of this screen's fixed (non-scrolling) height — gets more room.
+            HStack(spacing: 8) {
+                Text("Invite code").font(ForgeType.caption).foregroundStyle(ForgeColors.inkMuted)
+                // Bug fix — "it shrinks to a one liner when I select it, but on entry/view it's
+                // really large still." `SelectAllTextField` wraps a raw `UITextField`; without an
+                // explicit height it falls back to UIKit's own intrinsic sizing, which isn't
+                // pinned to this row's font/padding the way a plain SwiftUI `Text` would be — so it
+                // rendered inconsistently across focus states instead of the compact one-liner the
+                // row's own padding implied. A fixed height removes that ambiguity outright. Sized
+                // to about half a program row below (~71pt: 16+16 padding + a body + caption line)
+                // per "shrink it to half the size of the tab bars the programs are listed on."
+                SelectAllTextField(text: $inviteCode, placeholder: "optional, e.g. 7K2P9Q", font: ForgeType.captionUIFont, autocapitalization: .allCharacters, autocorrection: .no)
                     .frame(maxWidth: .infinity)
-                    .padding(12)
-                    .background(ForgeColors.cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(height: 18)
             }
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(ForgeColors.cardBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             ContinueButton(title: "Enter App", enabled: model.canEnterApp) {
                 guard let profile = model.buildProfile(),
