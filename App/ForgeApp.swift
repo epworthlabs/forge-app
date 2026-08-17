@@ -65,6 +65,18 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(forceDarkMode ? .dark : .light)
+        // Bug fix — "account deletion isn't actually deleting anything and won't prompt onboarding."
+        // `store` was never reset on sign-out, so after `deleteAccount()` (or a plain Sign Out) the
+        // *same* in-memory `AppStore` instance — still full of the old profile/history — stuck
+        // around. Signing back in then hit the `.task(id:)` below, `fetchProfile()` correctly failed
+        // (the record's gone), its `if let` never fired, and `store` was left holding that stale
+        // instance — so `else if let store { MainTabView() }` won this branch instead of falling
+        // through to `OnboardingView`, and the old data just kept showing. Clearing `store` here
+        // means a returning sign-in always starts from nil, so a missing profile genuinely routes
+        // to onboarding instead of resurrecting whatever was in memory before sign-out.
+        .onChange(of: signIn.isSignedIn) { isSignedIn in
+            if !isSignedIn { store = nil }
+        }
         .task {
             // Re-validated against Apple's servers, not just a locally-cached flag — catches a
             // sign-in revoked from Apple ID settings since last launch.

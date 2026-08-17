@@ -366,7 +366,19 @@ actor CloudKitStore {
         await deleteHistoryRecords()
         let idsToDelete = [Self.profileRecordID, Self.recipesRecordID, Self.customExercisesRecordID, Self.customFoodsRecordID]
         for id in idsToDelete {
-            _ = try? await database.deleteRecord(withID: id)
+            do {
+                _ = try await database.deleteRecord(withID: id)
+            } catch let error as CKError where error.code == .unknownItem {
+                // Already gone (or never existed) — not a failure.
+            } catch {
+                // Bug fix — this used to be a bare `try?`, so a failed profile deletion (network
+                // blip, CloudKit environment mismatch, etc.) was indistinguishable from success:
+                // the record would silently survive, `fetchProfile()` on the next sign-in would
+                // still find it, and "delete my account" would look like it did nothing at all.
+                // Surfaced so that failure mode is at least visible in device logs instead of
+                // silently mimicking a successful deletion.
+                print("[CloudKit] account deletion failed for \(id.recordName): \(error)")
+            }
         }
     }
 }
